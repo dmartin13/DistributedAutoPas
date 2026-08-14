@@ -1,41 +1,50 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
 #include "autopas/AutoPas.h"
 #include "autopas/options/IteratorBehavior.h"
+#include "autopas/utils/WrapOpenMP.h"
 #include "distributed_autopas/DomainDecomposition.h"
 #include "distributed_autopas/HaloExchange.h"
 #include "distributed_autopas/ParticleMigration.h"
 #include "distributed_autopas/ParticleSerialization.h"
+#include "distributed_autopas/Runtime.h"
 
 namespace dap {
 
 /**
- * Distributed wrapper around an AutoPas container.
+ * Distributed particle container built around a node-local AutoPas instance.
  *
- * Particle is intentionally a template parameter so that applications such as md-flexible can use their native
- * AutoPas-compatible particle type. Serializer controls how this particle is represented during MPI communication.
+ * The public interface is intentionally expressed in terms of operations on a
+ * distributed particle system rather than in terms of MPI or local AutoPas
+ * iterators. The simulator describes what should happen to owned particles and
+ * DistributedAutoPas decides how the local storage and communication are handled.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class DistributedAutoPas {
  public:
-  DistributedAutoPas(MPI_Comm comm, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff)
-      : DistributedAutoPas(comm, globalMin, globalMax, cutoff, [](auto &) {}) {}
+      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, [](auto &) {}) {}
 
   /**
-   * Construct and configure the local AutoPas instance before it is initialized.
+   * Construct and configure the node-local AutoPas instance before initialization.
    *
-   * The configurator receives autopas::AutoPas<Particle>&. This avoids hard-coding all AutoPas configuration options
-   * into DistributedAutoPas while we are still prototyping the public API.
+   * The configurator is currently an explicit customization point for AutoPas' local
+   * tuning configuration. It is intentionally separate from all distributed concerns.
    */
   template <class Configurator>
-  DistributedAutoPas(MPI_Comm comm, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, Configurator &&configurator)
-      : _domain(comm, globalMin, globalMax), _particleMigration(comm), _haloExchange(comm), _cutoff(cutoff) {
+      : _runtime(runtime),
+        _domain(runtime.communicator(), globalMin, globalMax),
+        _particleMigration(runtime.communicator()),
+        _haloExchange(runtime.communicator()),
+        _cutoff(cutoff) {
     _autoPas.setBoxMin(_domain.localMin());
     _autoPas.setBoxMax(_domain.localMax());
     _autoPas.setCutoff(_cutoff);
@@ -47,11 +56,44 @@ class DistributedAutoPas {
 
   void addParticle(const Particle &particle) { _autoPas.addParticle(particle); }
 
+  template <class Collection, class Predicate>
+  void addParticlesIf(Collection &particles, Predicate &&predicate) {
+    _autoPas.addParticlesIf(particles, std::forward<Predicate>(predicate));
+  }
+
+  /**
+   * Execute a particle-local kernel for every particle owned by this process.
+   *
+   * The kernel must be safe to execute concurrently for different particles. Today
+   * this is implemented with the node-local AutoPas iterator and OpenMP. Keeping the
+   * operation at this level allows a future implementation to dispatch the same
+   * operation to a GPU without exposing container iterators to the simulator.
+   */
+  template <class Kernel>
+  void applyToOwnedParticles(Kernel &&kernel) {
+    auto &&kernelRef = kernel;
+    AUTOPAS_OPENMP(parallel)
+    for (auto iter = _autoPas.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+      kernelRef(*iter);
+    }
+  }
+
+  /**
+   * Read-only traversal intended for diagnostics and output. Unlike
+   * applyToOwnedParticles(), this is deliberately sequential to preserve output order.
+   */
+  template <class Visitor>
+  void forEachOwnedParticle(Visitor &&visitor) const {
+    for (auto iter = _autoPas.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+      visitor(*iter);
+    }
+  }
+
   /**
    * Synchronize the distributed particle state and execute an ordinary AutoPas functor.
    *
-   * No functor adapter is used. The simulator can use the same AutoPas functors that it would use with a local
-   * autopas::AutoPas<Particle> container.
+   * Migration and halo creation are implementation details of this operation. This
+   * keeps the simulator independent of the concrete communication algorithm.
    */
   template <class Functor>
   bool computeInteractions(Functor *functor) {
@@ -59,18 +101,57 @@ class DistributedAutoPas {
     return _autoPas.computeInteractions(functor);
   }
 
+  [[nodiscard]] std::size_t getLocalNumberOfOwnedParticles() const {
+    return _autoPas.getNumberOfParticles(autopas::IteratorBehavior::owned);
+  }
+
+  [[nodiscard]] std::size_t getLocalNumberOfHaloParticles() const {
+    return _autoPas.getNumberOfParticles(autopas::IteratorBehavior::halo);
+  }
+
+  [[nodiscard]] std::size_t getLocalNumberOfParticles() const {
+    return _autoPas.getNumberOfParticles(autopas::IteratorBehavior::ownedOrHalo);
+  }
+
+  [[nodiscard]] std::size_t getGlobalNumberOfOwnedParticles() const {
+    return globalSum(getLocalNumberOfOwnedParticles());
+  }
+
+  [[nodiscard]] int rank() const { return _runtime.rank(); }
+  [[nodiscard]] int numberOfRanks() const { return _runtime.size(); }
+  [[nodiscard]] bool isRoot() const { return _runtime.isRoot(); }
+
+  void barrier() const { _runtime.barrier(); }
+
+  template <class T>
+  [[nodiscard]] T globalSum(T localValue) const {
+    return _runtime.globalSum(localValue);
+  }
+
+  [[nodiscard]] bool ownsPosition(const std::array<double, 3> &position) const {
+    return _domain.isInsideLocalDomain(position);
+  }
+
+  [[nodiscard]] const std::array<double, 3> &localBoxMin() const { return _domain.localMin(); }
+  [[nodiscard]] const std::array<double, 3> &localBoxMax() const { return _domain.localMax(); }
+  [[nodiscard]] const std::array<double, 3> &globalBoxMin() const { return _domain.globalMin(); }
+  [[nodiscard]] const std::array<double, 3> &globalBoxMax() const { return _domain.globalMax(); }
+
+  // Local AutoPas metadata that is still used by md-flexible for tuning statistics.
+  // These methods deliberately expose values, not the local container itself.
+  [[nodiscard]] bool localSearchSpaceIsTrivial() const { return _autoPas.searchSpaceIsTrivial(); }
+  [[nodiscard]] double getMeanLocalRebuildFrequency() { return _autoPas.getMeanRebuildFrequency(); }
+
   void finalize() { _autoPas.finalize(); }
 
-  [[nodiscard]] DomainDecomposition &domain() { return _domain; }
-  [[nodiscard]] const DomainDecomposition &domain() const { return _domain; }
-
   /**
-   * Temporary access to the local AutoPas instance.
-   *
-   * This keeps the first md-flexible integration small. As the DistributedAutoPas API matures, commonly used AutoPas
-   * operations can be forwarded directly and this escape hatch can be reduced or removed.
+   * Transitional escape hatch for md-flexible helper classes that still have an
+   * AutoPas-specific interface (TimeDiscretization, Thermostat and VTK output).
+   * New code should not use this method. It will be removed once those helpers consume
+   * the DistributedAutoPas particle API directly.
    */
   [[nodiscard]] autopas::AutoPas<Particle> &localAutoPas() { return _autoPas; }
+
   [[nodiscard]] const autopas::AutoPas<Particle> &localAutoPas() const { return _autoPas; }
 
  private:
@@ -80,7 +161,7 @@ class DistributedAutoPas {
     _autoPas.addParticles(immigrants);
 
     std::vector<Particle> ownedParticles;
-    ownedParticles.reserve(_autoPas.getNumberOfParticles(autopas::IteratorBehavior::owned));
+    ownedParticles.reserve(getLocalNumberOfOwnedParticles());
 
     for (auto iter = _autoPas.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
       ownedParticles.push_back(*iter);
@@ -90,6 +171,7 @@ class DistributedAutoPas {
     _autoPas.addHaloParticles(haloParticles);
   }
 
+  Runtime &_runtime;
   DomainDecomposition _domain;
   ParticleMigration<Particle, Serializer> _particleMigration;
   HaloExchange<Particle, Serializer> _haloExchange;
