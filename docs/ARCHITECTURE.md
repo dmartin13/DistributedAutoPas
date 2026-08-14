@@ -41,6 +41,13 @@ are implementation details. The public API intentionally provides no access to t
 node-local AutoPas container. Diagnostics and output consume particle traversal and
 local tuning metadata through dedicated DistributedAutoPas operations.
 
+
+## Initial particle distribution
+
+Initialization and checkpoint loading use `addDistributedParticles()`. Every process contributes the particles currently available to it, and DistributedAutoPas routes each particle directly to the rank that owns its position according to the current decomposition. The simulator does not inspect rank ownership and does not use a particle communicator.
+
+The current MPI implementation uses an all-to-all exchange because initialization may move a particle directly to any rank. This is intentionally separate from timestep migration, which currently assumes movement only to direct neighbors.
+
 ## Runtime
 
 `dap::Runtime` owns the process communication runtime. The current backend is

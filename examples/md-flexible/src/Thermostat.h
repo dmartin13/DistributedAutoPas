@@ -107,18 +107,18 @@ double calcTemperature(const Container &container, ParticlePropertiesLibraryTemp
         particlePropertiesLibrary.getMolMass(particle.getTypeId()) * autopas::utils::ArrayMath::dot(velocity, velocity);
 #if MD_FLEXIBLE_MODE == MULTISITE
     const auto angularVelocity = particle.getAngularVel();
-    kineticEnergyMul2 += autopas::utils::ArrayMath::dot(
-        particlePropertiesLibrary.getMomentOfInertia(particle.getTypeId()),
-        autopas::utils::ArrayMath::mul(angularVelocity, angularVelocity));
+    kineticEnergyMul2 +=
+        autopas::utils::ArrayMath::dot(particlePropertiesLibrary.getMomentOfInertia(particle.getTypeId()),
+                                       autopas::utils::ArrayMath::mul(angularVelocity, angularVelocity));
 #endif
     return kineticEnergyMul2;
   });
 
-  constexpr unsigned int degreesOfFreedom{
+  constexpr unsigned int degreesOfFreedom {
 #if MD_FLEXIBLE_MODE == MULTISITE
-      6
+    6
 #else
-      3
+    3
 #endif
   };
 
@@ -145,7 +145,8 @@ double calcTemperature(const Container &container, ParticlePropertiesLibraryTemp
  * @return map of: particle typeID -> global temperature for this type
  */
 template <class Container, class ParticlePropertiesLibraryTemplate>
-auto calcTemperatureComponent(const Container &container, ParticlePropertiesLibraryTemplate &particlePropertiesLibrary) {
+auto calcTemperatureComponent(const Container &container,
+                              ParticlePropertiesLibraryTemplate &particlePropertiesLibrary) {
   using autopas::utils::ArrayMath::dot;
   using namespace autopas::utils::ArrayMath::literals;
 
@@ -179,16 +180,14 @@ auto calcTemperatureComponent(const Container &container, ParticlePropertiesLibr
       return kineticEnergyMul2;
     });
 
-    const auto numberParticlesLocal =
-        detail::sumOwnedParticles(container, size_t{0}, [&](const auto &particle) -> size_t {
-          return particle.getTypeId() == typeID ? 1ul : 0ul;
-        });
+    const auto numberParticlesLocal = detail::sumOwnedParticles(
+        container, size_t{0},
+        [&](const auto &particle) -> size_t { return particle.getTypeId() == typeID ? 1ul : 0ul; });
 
     const auto kineticEnergyMul2Global = detail::globalSum(container, kineticEnergyMul2Local);
     const auto numberParticlesGlobal = detail::globalSum(container, numberParticlesLocal);
 
-    temperatureMap[typeID] = kineticEnergyMul2Global /
-                             (static_cast<double>(numberParticlesGlobal) * degreesOfFreedom);
+    temperatureMap[typeID] = kineticEnergyMul2Global / (static_cast<double>(numberParticlesGlobal) * degreesOfFreedom);
   }
 
   return temperatureMap;
@@ -231,10 +230,9 @@ void addBrownianMotion(Container &container, ParticlePropertiesLibraryTemplate &
                                        std::sqrt(targetTemperature / particlePropertiesLibrary.getMolMass(typeID)));
 #if MD_FLEXIBLE_MODE == MULTISITE
     const auto momentOfInertia = particlePropertiesLibrary.getMomentOfInertia(typeID);
-    rotationalVelocityScale.emplace(
-        typeID, std::array<double, 3>{std::sqrt(targetTemperature / momentOfInertia[0]),
-                                     std::sqrt(targetTemperature / momentOfInertia[1]),
-                                     std::sqrt(targetTemperature / momentOfInertia[2])});
+    rotationalVelocityScale.emplace(typeID, std::array<double, 3>{std::sqrt(targetTemperature / momentOfInertia[0]),
+                                                                  std::sqrt(targetTemperature / momentOfInertia[1]),
+                                                                  std::sqrt(targetTemperature / momentOfInertia[2])});
 #endif
   }
 

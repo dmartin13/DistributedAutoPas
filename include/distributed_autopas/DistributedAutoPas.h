@@ -8,6 +8,7 @@
 #include "autopas/AutoPas.h"
 #include "autopas/options/IteratorBehavior.h"
 #include "autopas/utils/WrapOpenMP.h"
+#include "distributed_autopas/Communication.h"
 #include "distributed_autopas/DomainDecomposition.h"
 #include "distributed_autopas/HaloExchange.h"
 #include "distributed_autopas/ParticleMigration.h"
@@ -27,8 +28,8 @@ namespace dap {
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class DistributedAutoPas {
  public:
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
-                     const std::array<double, 3> &globalMax, double cutoff)
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+                     double cutoff)
       : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, [](auto &) {}) {}
 
   /**
@@ -38,8 +39,8 @@ class DistributedAutoPas {
    * tuning configuration. It is intentionally separate from all distributed concerns.
    */
   template <class Configurator>
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
-                     const std::array<double, 3> &globalMax, double cutoff, Configurator &&configurator)
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+                     double cutoff, Configurator &&configurator)
       : _runtime(runtime),
         _domain(runtime.rank(), runtime.size(), globalMin, globalMax),
         _particleMigration(runtime.communicator()),
@@ -56,9 +57,40 @@ class DistributedAutoPas {
 
   void addParticle(const Particle &particle) { _autoPas.addParticle(particle); }
 
-  template <class Collection, class Predicate>
-  void addParticlesIf(Collection &particles, Predicate &&predicate) {
-    _autoPas.addParticlesIf(particles, std::forward<Predicate>(predicate));
+  /**
+   * Redistribute application-provided particles according to the current domain decomposition
+   * and add the particles owned by this rank to the local AutoPas container.
+   *
+   * Every rank contributes its local input collection and must call this collective operation.
+   * Particles are sent directly to their owning rank, so the application does not need a particle
+   * communicator or access to the distributed communication context. This operation is intended
+   * for initialization and checkpoint loading, not for timestep migration.
+   *
+   * Particles outside the global simulation box are ignored. The application can detect such
+   * input through its global particle-count sanity check.
+   */
+  template <class Collection>
+  void addDistributedParticles(const Collection &particles) {
+    std::vector<std::vector<Particle>> particlesByDestination(static_cast<std::size_t>(_domain.numRanks()));
+
+    for (const auto &particle : particles) {
+      const auto &position = particle.getR();
+      const auto &globalMin = _domain.globalMin();
+      const auto &globalMax = _domain.globalMax();
+
+      const bool insideGlobalDomain = position[0] >= globalMin[0] and position[0] < globalMax[0] and
+                                      position[1] >= globalMin[1] and position[1] < globalMax[1] and
+                                      position[2] >= globalMin[2] and position[2] < globalMax[2];
+      if (not insideGlobalDomain) {
+        continue;
+      }
+
+      particlesByDestination[static_cast<std::size_t>(_domain.targetRank(position))].push_back(particle);
+    }
+
+    auto localParticles =
+        exchangeParticlesByRank<Particle, Serializer>(_runtime.communicator(), particlesByDestination);
+    _autoPas.addParticles(localParticles);
   }
 
   /**
@@ -145,10 +177,6 @@ class DistributedAutoPas {
   template <class T>
   [[nodiscard]] T globalSum(T localValue) const {
     return _runtime.globalSum(localValue);
-  }
-
-  [[nodiscard]] bool ownsPosition(const std::array<double, 3> &position) const {
-    return _domain.isInsideLocalDomain(position);
   }
 
   [[nodiscard]] const std::array<double, 3> &localBoxMin() const { return _domain.localMin(); }

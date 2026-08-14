@@ -38,7 +38,6 @@ extern template bool autopas::AutoPas<ParticleType>::computeInteractions(LJFunct
 
 #include <iostream>
 
-#include "ParticleCommunicator.h"
 #include "Thermostat.h"
 #include "TimeDiscretization.h"
 #include "autopas/utils/MemoryProfiler.h"
@@ -153,11 +152,11 @@ Simulation::Simulation(const MDFlexConfig &configuration,
         autoPas.setAllowedLoadEstimators(_configuration.loadEstimatorOptions.value);
 
         // Triwise specific options
-        autoPas.setAllowedDataLayouts(_configuration.dataLayoutOptions3B.value, autopas::InteractionTypeOption::triwise);
+        autoPas.setAllowedDataLayouts(_configuration.dataLayoutOptions3B.value,
+                                      autopas::InteractionTypeOption::triwise);
         autoPas.setAllowedNewton3Options(_configuration.newton3Options3B.value,
-                                        autopas::InteractionTypeOption::triwise);
-        autoPas.setAllowedTraversals(_configuration.traversalOptions3B.value,
-                                     autopas::InteractionTypeOption::triwise);
+                                         autopas::InteractionTypeOption::triwise);
+        autoPas.setAllowedTraversals(_configuration.traversalOptions3B.value, autopas::InteractionTypeOption::triwise);
 
         // General AutoPas options. Box and cutoff are owned by DistributedAutoPas and are
         // therefore intentionally not configured here.
@@ -190,7 +189,7 @@ Simulation::Simulation(const MDFlexConfig &configuration,
         autoPas.setOutputSuffix(outputSuffix);
       });
 
-  // The legacy RegularGridDecomposition is still used by particle loading and VTK in this
+  // The legacy RegularGridDecomposition is still used by VTK domain-subdivision output in this
   // transitional step. Make sure it describes the same static 1D decomposition as
   // DistributedAutoPas instead of silently running with two different ownership maps.
   const auto &dapLocalMin = _distributedAutoPasContainer->localBoxMin();
@@ -198,8 +197,7 @@ Simulation::Simulation(const MDFlexConfig &configuration,
   const auto &legacyLocalMin = _domainDecomposition->getLocalBoxMin();
   const auto &legacyLocalMax = _domainDecomposition->getLocalBoxMax();
   for (std::size_t d = 0; d < 3; ++d) {
-    if (std::abs(dapLocalMin[d] - legacyLocalMin[d]) > 1e-12 or
-        std::abs(dapLocalMax[d] - legacyLocalMax[d]) > 1e-12) {
+    if (std::abs(dapLocalMin[d] - legacyLocalMin[d]) > 1e-12 or std::abs(dapLocalMax[d] - legacyLocalMax[d]) > 1e-12) {
       throw std::runtime_error(
           "DistributedAutoPas and md-flexible use different local domains. "
           "The current integration step requires a static 1D decomposition along x.");
@@ -482,8 +480,8 @@ void Simulation::updateVelocities() {
 
   if (deltaT != 0) {
     _timers.velocityUpdate.start();
-    TimeDiscretization::calculateVelocities(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
-                                            deltaT);
+    TimeDiscretization::calculateVelocities(*_distributedAutoPasContainer,
+                                            *(_configuration.getParticlePropertiesLibrary()), deltaT);
     _timers.velocityUpdate.stop();
   }
 }
@@ -492,8 +490,8 @@ void Simulation::updateAngularVelocities() {
   const double deltaT = _configuration.deltaT.value;
 
   _timers.angularVelocityUpdate.start();
-  TimeDiscretization::calculateAngularVelocities(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
-                                                 deltaT);
+  TimeDiscretization::calculateAngularVelocities(*_distributedAutoPasContainer,
+                                                 *(_configuration.getParticlePropertiesLibrary()), deltaT);
   _timers.angularVelocityUpdate.stop();
 }
 
@@ -506,9 +504,7 @@ void Simulation::updateThermostat() {
   }
 }
 
-long Simulation::accumulateTime(const long &time) {
-  return _distributedAutoPasContainer->globalSum(time);
-}
+long Simulation::accumulateTime(const long &time) { return _distributedAutoPasContainer->globalSum(time); }
 
 bool Simulation::calculatePairwiseForces() {
   const auto wasTuningIteration = applyWithChosenFunctor<bool>([&](auto &&functor) {
@@ -535,8 +531,7 @@ bool Simulation::calculateTriwiseForces() {
 }
 
 void Simulation::calculateGlobalForces(const std::array<double, 3> &globalForce) {
-  _distributedAutoPasContainer->applyToOwnedParticles(
-      [&](auto &particle) { particle.addF(globalForce); });
+  _distributedAutoPasContainer->applyToOwnedParticles([&](auto &particle) { particle.addF(globalForce); });
 }
 
 void Simulation::logSimulationState() {
@@ -647,9 +642,8 @@ void Simulation::logMeasurements() {
               << (static_cast<double>(_numTuningIterations) / static_cast<double>(_iteration) * 100.) << "%"
               << "\n";
 
-    auto mfups =
-        static_cast<double>(_distributedAutoPasContainer->getLocalNumberOfOwnedParticles() * _iteration) *
-        1e-6 / (static_cast<double>(forceUpdateTotal) * 1e-9);  // 1e-9 for ns to s, 1e-6 for M in MFUPs
+    auto mfups = static_cast<double>(_distributedAutoPasContainer->getLocalNumberOfOwnedParticles() * _iteration) *
+                 1e-6 / (static_cast<double>(forceUpdateTotal) * 1e-9);  // 1e-9 for ns to s, 1e-6 for M in MFUPs
     std::cout << "MFUPs/sec                          : " << mfups << "\n";
 #ifdef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
     std::cout << "Mean Rebuild Frequency               : "
@@ -694,58 +688,15 @@ void Simulation::checkNumParticles(size_t expectedNumParticlesGlobal, size_t num
 }
 
 void Simulation::loadParticles() {
-  // Store how many particles are in this config object before removing them.
+  // Each rank contributes the particles currently stored in its configuration.
+  // DistributedAutoPas routes every particle directly to the rank that owns its position.
   const auto numParticlesInConfigLocally = _configuration.particles.size();
-  // When loading checkpoints, the config file might contain particles that do not belong to this rank,
-  // because rank boundaries don't align with those at the end of the previous simulation due to dynamic load balancing.
-  // Idea: Only load what belongs here and send the rest away.
-  _distributedAutoPasContainer->addParticlesIf(_configuration.particles, [&](auto &p) {
-    if (_distributedAutoPasContainer->ownsPosition(p.getR())) {
-      // Mark particle in vector as dummy, so we know it has been inserted.
-      p.setOwnershipState(autopas::OwnershipState::dummy);
-      return true;
-    }
-    return false;
-  });
-
-  // Remove what has been inserted. Everything that remains does not belong into this rank.
-  _configuration.particles.erase(std::remove_if(_configuration.particles.begin(), _configuration.particles.end(),
-                                                [&](const auto &p) { return p.isDummy(); }),
-                                 _configuration.particles.end());
-
-  // Send all remaining particles to all ranks
-  // TODO: This is not optimal but since this only happens once upon initialization it is not too bad.
-  //       Nevertheless it could be improved by determining which particle has to go to which rank.
-  const auto rank = _distributedAutoPasContainer->rank();
-  const auto numberOfRanks = _distributedAutoPasContainer->numberOfRanks();
-  ParticleCommunicator particleCommunicator(_domainDecomposition->getCommunicator());
-  for (int receiverRank = 0; receiverRank < numberOfRanks; ++receiverRank) {
-    // don't send to ourselves
-    if (receiverRank == rank) {
-      continue;
-    }
-    particleCommunicator.sendParticles(_configuration.particles, receiverRank);
-  }
-  // Erase all locally stored particles. They don't belong to this rank and have been sent away.
-  _configuration.flushParticles();
-
-  // Receive particles from all other ranks.
-  for (int senderRank = 0; senderRank < numberOfRanks; ++senderRank) {
-    // don't send to ourselves
-    if (senderRank == rank) {
-      continue;
-    }
-    particleCommunicator.receiveParticles(_configuration.particles, senderRank);
-  }
-  particleCommunicator.waitForSendRequests();
-
-  // Add all new particles that belong in this rank
-  _distributedAutoPasContainer->addParticlesIf(
-      _configuration.particles, [&](auto &p) { return _distributedAutoPasContainer->ownsPosition(p.getR()); });
-  // cleanup
+  _distributedAutoPasContainer->addDistributedParticles(_configuration.particles);
   _configuration.flushParticles();
 
   // Output and sanity checks
+  const auto rank = _distributedAutoPasContainer->rank();
+  const auto numberOfRanks = _distributedAutoPasContainer->numberOfRanks();
   const size_t numParticlesLocally = _distributedAutoPasContainer->getLocalNumberOfOwnedParticles();
   std::cout << "Number of particles at initialization "
             // align outputs based on the max number of ranks
@@ -756,15 +707,17 @@ void Simulation::loadParticles() {
   const auto numParticlesInConfigGlobal = _distributedAutoPasContainer->globalSum(numParticlesInConfigLocally);
 
   if (_distributedAutoPasContainer->isRoot()) {
-    std::cout << "Number of particles at initialization globally"
-              << std::setw(std::to_string(numberOfRanks).length()) << "" << ": " << numParticlesAddedGlobal << "\n";
+    std::cout << "Number of particles at initialization globally" << std::setw(std::to_string(numberOfRanks).length())
+              << ""
+              << ": " << numParticlesAddedGlobal << "\n";
 
     if (numParticlesAddedGlobal != numParticlesInConfigGlobal) {
       throw std::runtime_error(
           "Simulation::loadParticles(): "
           "Not all particles from the configuration file could be added to DistributedAutoPas!\n"
           "Configuration : " +
-          std::to_string(numParticlesInConfigGlobal) + "\n"
+          std::to_string(numParticlesInConfigGlobal) +
+          "\n"
           "Added globally: " +
           std::to_string(numParticlesAddedGlobal));
     }

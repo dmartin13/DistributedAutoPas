@@ -12,7 +12,6 @@
 #include <string>
 #include <utility>
 
-
 ParallelVtkWriter::ParallelVtkWriter(std::string sessionName, const std::string &outputFolder,
                                      const int &maximumNumberOfDigitsInIteration, dap::Runtime &runtime)
     : _numberOfRanks(runtime.size()),

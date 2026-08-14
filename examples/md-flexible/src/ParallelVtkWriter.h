@@ -11,12 +11,12 @@
 #include <string>
 #include <unordered_set>
 
+#include "autopas/tuning/Configuration.h"
 #include "distributed_autopas/DistributedAutoPas.h"
 #include "distributed_autopas/Runtime.h"
-#include "autopas/tuning/Configuration.h"
 #include "src/TypeDefinitions.h"
-#include "src/domainDecomposition/RegularGridDecomposition.h"
 #include "src/distributed/MoleculeLJParticleSerializer.h"
+#include "src/domainDecomposition/RegularGridDecomposition.h"
 
 /**
  * The ParallelVtkWriter creates VTK files for a distributed simulation.

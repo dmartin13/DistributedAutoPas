@@ -2,6 +2,8 @@
 
 #include <mpi.h>
 
+#include <cstddef>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -73,6 +75,74 @@ LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right
                tag + 3, comm, MPI_STATUS_IGNORE);
 
   return LeftRightExchange<Particle>{unpackParticles(recvFromLeftMessages), unpackParticles(recvFromRightMessages)};
+}
+
+/**
+ * Redistribute particles to arbitrary destination ranks.
+ *
+ * Each entry in particlesByDestination contains the particles that the calling rank wants to send
+ * to the rank with the same index. The returned vector contains all particles sent to the calling
+ * rank by all ranks, including particles routed to itself.
+ *
+ * This collective is primarily used for initialization and checkpoint redistribution where a
+ * particle may need to move directly to any rank. Timestep migration intentionally uses the
+ * cheaper direct-neighbor exchange instead.
+ */
+template <class Particle, class Serializer = ParticleSerializer<Particle>>
+std::vector<Particle> exchangeParticlesByRank(MPI_Comm comm,
+                                              const std::vector<std::vector<Particle>> &particlesByDestination) {
+  using Message = typename Serializer::Message;
+  static_assert(std::is_trivially_copyable_v<Message>,
+                "ParticleSerializer::Message must be trivially copyable for MPI_BYTE communication.");
+
+  int numberOfRanks = 0;
+  MPI_Comm_size(comm, &numberOfRanks);
+
+  if (particlesByDestination.size() != static_cast<std::size_t>(numberOfRanks)) {
+    throw std::invalid_argument("exchangeParticlesByRank(): one destination buffer per rank is required.");
+  }
+
+  std::vector<int> sendCounts(numberOfRanks, 0);
+  std::vector<int> sendDisplacements(numberOfRanks, 0);
+  std::vector<Message> sendMessages;
+
+  std::size_t totalSendMessages = 0;
+  for (const auto &particles : particlesByDestination) {
+    totalSendMessages += particles.size();
+  }
+  sendMessages.reserve(totalSendMessages);
+
+  for (int destination = 0; destination < numberOfRanks; ++destination) {
+    sendDisplacements[destination] = static_cast<int>(sendMessages.size() * sizeof(Message));
+    sendCounts[destination] = static_cast<int>(particlesByDestination[destination].size() * sizeof(Message));
+
+    for (const auto &particle : particlesByDestination[destination]) {
+      sendMessages.push_back(Serializer::pack(particle));
+    }
+  }
+
+  std::vector<int> receiveCounts(numberOfRanks, 0);
+  MPI_Alltoall(sendCounts.data(), 1, MPI_INT, receiveCounts.data(), 1, MPI_INT, comm);
+
+  std::vector<int> receiveDisplacements(numberOfRanks, 0);
+  int totalReceiveBytes = 0;
+  for (int source = 0; source < numberOfRanks; ++source) {
+    receiveDisplacements[source] = totalReceiveBytes;
+    totalReceiveBytes += receiveCounts[source];
+  }
+
+  std::vector<Message> receiveMessages(static_cast<std::size_t>(totalReceiveBytes) / sizeof(Message));
+
+  MPI_Alltoallv(sendMessages.data(), sendCounts.data(), sendDisplacements.data(), MPI_BYTE, receiveMessages.data(),
+                receiveCounts.data(), receiveDisplacements.data(), MPI_BYTE, comm);
+
+  std::vector<Particle> receivedParticles;
+  receivedParticles.reserve(receiveMessages.size());
+  for (const auto &message : receiveMessages) {
+    receivedParticles.push_back(Serializer::unpack(message));
+  }
+
+  return receivedParticles;
 }
 
 }  // namespace dap

@@ -19,9 +19,9 @@
 #include "src/ParallelVtkWriter.h"
 #include "src/TypeDefinitions.h"
 #include "src/configuration/MDFlexConfig.h"
+#include "src/distributed/MoleculeLJParticleSerializer.h"
 #include "src/domainDecomposition/DomainDecomposition.h"
 #include "src/domainDecomposition/RegularGridDecomposition.h"
-#include "src/distributed/MoleculeLJParticleSerializer.h"
 
 /**
  * Handles minimal initialization requirements for MD-Flexible simulations.
@@ -277,7 +277,7 @@ class Simulation {
 
  private:
   /**
-   * Load particles from this object's config into this object's AutoPas container.
+   * Load and redistribute particles from this object's config through DistributedAutoPas.
    *
    * @note This also clears all particles from the config file!
    */
@@ -338,13 +338,12 @@ class Simulation {
   void updateAngularVelocities();
 
   /**
-   * Updates the thermostat of for the local domain.
-   * @todo The thermostat should act globally and therefore needs to be communicated to all processes.
+   * Updates the global thermostat through DistributedAutoPas reductions.
    */
   void updateThermostat();
 
   /**
-   * This simulation's domain decomposition.
+   * Legacy md-flexible domain decomposition, currently retained for domain-subdivision VTK output.
    */
   std::shared_ptr<RegularGridDecomposition> _domainDecomposition;
   /**
