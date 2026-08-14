@@ -27,8 +27,8 @@ namespace dap {
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class DistributedAutoPas {
  public:
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff)
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                     const std::array<double, 3> &globalMax, double cutoff)
       : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, [](auto &) {}) {}
 
   /**
@@ -38,8 +38,8 @@ class DistributedAutoPas {
    * tuning configuration. It is intentionally separate from all distributed concerns.
    */
   template <class Configurator>
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff, Configurator &&configurator)
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                     const std::array<double, 3> &globalMax, double cutoff, Configurator &&configurator)
       : _runtime(runtime),
         _domain(runtime.rank(), runtime.size(), globalMin, globalMax),
         _particleMigration(runtime.communicator()),
@@ -76,6 +76,25 @@ class DistributedAutoPas {
     for (auto iter = _autoPas.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
       kernelRef(*iter);
     }
+  }
+
+  /**
+   * Sum a particle-local quantity over all particles owned by this process.
+   *
+   * This is a local reduction. Distributed reductions are intentionally kept
+   * separate via globalSum(), so callers can combine several local quantities
+   * before triggering communication. The operation hides the node-local AutoPas
+   * iterator and can later be implemented by a device reduction.
+   */
+  template <class Value, class Transform>
+  [[nodiscard]] Value sumOwnedParticles(Value initialValue, Transform &&transform) const {
+    auto result = initialValue;
+    auto &&transformRef = transform;
+    AUTOPAS_OPENMP(parallel reduction(+ : result))
+    for (auto iter = _autoPas.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+      result += transformRef(*iter);
+    }
+    return result;
   }
 
   /**
@@ -147,14 +166,18 @@ class DistributedAutoPas {
   void finalize() { _autoPas.finalize(); }
 
   /**
-   * Transitional escape hatch for md-flexible helper classes that still have an
-   * AutoPas-specific interface (TimeDiscretization, Thermostat and VTK output).
+   * Transitional escape hatch for md-flexible output code that still has an
+   * AutoPas-specific interface (currently the VTK writer).
    * New code should not use this method. It will be removed once those helpers consume
    * the DistributedAutoPas particle API directly.
    */
-  [[nodiscard]] autopas::AutoPas<Particle> &localAutoPas() { return _autoPas; }
+  [[nodiscard]] autopas::AutoPas<Particle> &localAutoPas() {
+    return _autoPas;
+  }
 
-  [[nodiscard]] const autopas::AutoPas<Particle> &localAutoPas() const { return _autoPas; }
+  [[nodiscard]] const autopas::AutoPas<Particle> &localAutoPas() const {
+    return _autoPas;
+  }
 
  private:
   void synchronizeParticles() {

@@ -19,9 +19,9 @@
 #include "src/ParallelVtkWriter.h"
 #include "src/TypeDefinitions.h"
 #include "src/configuration/MDFlexConfig.h"
-#include "src/distributed/MoleculeLJParticleSerializer.h"
 #include "src/domainDecomposition/DomainDecomposition.h"
 #include "src/domainDecomposition/RegularGridDecomposition.h"
+#include "src/distributed/MoleculeLJParticleSerializer.h"
 
 /**
  * Handles minimal initialization requirements for MD-Flexible simulations.
@@ -96,7 +96,7 @@ class Simulation {
 
   /**
    * Temporary alias to the local AutoPas container owned by _distributedAutoPasContainer.
-   * This is currently used only by legacy thermostat and VTK helpers and will be removed.
+   * This is currently used only by the legacy VTK writer and will be removed.
    */
   std::shared_ptr<autopas::AutoPas<ParticleType>> _autoPasContainer;
 

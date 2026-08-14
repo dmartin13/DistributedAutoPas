@@ -31,6 +31,7 @@ The public API should describe operations, not local storage details. Examples:
 
 ```cpp
 particles.applyToOwnedParticles(PositionUpdate{dt});
+auto localKineticEnergy = particles.sumOwnedParticles(0.0, KineticEnergy{});
 particles.computeInteractions(&ljFunctor);
 auto globalCount = particles.getGlobalNumberOfOwnedParticles();
 ```
@@ -50,13 +51,21 @@ A future backend design may separate control communication from particle data
 transport, e.g. MPI for process/topology control and CUDA-aware MPI, NCCL, or
 NVSHMEM for GPU-resident particle data.
 
+## Particle-local reductions
+
+Simulator components such as the thermostat express local reductions through
+`sumOwnedParticles()` and distributed reductions through `globalSum()`. They do not
+perform MPI collectives themselves. This keeps communication policy inside
+DistributedAutoPas while still allowing the simulator to define the physical
+quantity that should be accumulated.
+
 ## Current limitations
 
 - static 1D decomposition in x
 - periodic migration / halo handling in x only
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
-- `localAutoPas()` is still used by the legacy md-flexible thermostat and VTK helpers
+- `localAutoPas()` is still used by the legacy md-flexible VTK writer
 - MPI is the only communication backend
 
 ## Bundled example application

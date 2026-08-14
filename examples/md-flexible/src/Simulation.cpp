@@ -10,7 +10,6 @@
 
 #include "TypeDefinitions.h"
 #include "autopas/AutoPasDecl.h"
-#include "autopas/utils/WrapMPI.h"
 #include "autopas/utils/WrapOpenMP.h"
 
 // Declare the main AutoPas class and the computeInteractions() methods with all used functors as extern template
@@ -43,7 +42,6 @@ extern template bool autopas::AutoPas<ParticleType>::computeInteractions(LJFunct
 #include "Thermostat.h"
 #include "TimeDiscretization.h"
 #include "autopas/utils/MemoryProfiler.h"
-#include "autopas/utils/WrapMPI.h"
 #include "configuration/MDFlexConfig.h"
 
 namespace {
@@ -156,11 +154,11 @@ Simulation::Simulation(const MDFlexConfig &configuration,
         autoPas.setAllowedLoadEstimators(_configuration.loadEstimatorOptions.value);
 
         // Triwise specific options
-        autoPas.setAllowedDataLayouts(_configuration.dataLayoutOptions3B.value,
-                                      autopas::InteractionTypeOption::triwise);
+        autoPas.setAllowedDataLayouts(_configuration.dataLayoutOptions3B.value, autopas::InteractionTypeOption::triwise);
         autoPas.setAllowedNewton3Options(_configuration.newton3Options3B.value,
-                                         autopas::InteractionTypeOption::triwise);
-        autoPas.setAllowedTraversals(_configuration.traversalOptions3B.value, autopas::InteractionTypeOption::triwise);
+                                        autopas::InteractionTypeOption::triwise);
+        autoPas.setAllowedTraversals(_configuration.traversalOptions3B.value,
+                                     autopas::InteractionTypeOption::triwise);
 
         // General AutoPas options. Box and cutoff are owned by DistributedAutoPas and are
         // therefore intentionally not configured here.
@@ -193,10 +191,10 @@ Simulation::Simulation(const MDFlexConfig &configuration,
         autoPas.setOutputSuffix(outputSuffix);
       });
 
-  // Aliasing shared_ptr: no second AutoPas object is created. Both pointers share the
-  // lifetime of the DistributedAutoPas object.
-  _autoPasContainer = std::shared_ptr<autopas::AutoPas<ParticleType>>(_distributedAutoPasContainer,
-                                                                      &_distributedAutoPasContainer->localAutoPas());
+  // Transitional alias for the legacy VTK writer. No second AutoPas object is created.
+  // Both pointers share the lifetime of the DistributedAutoPas object.
+  _autoPasContainer = std::shared_ptr<autopas::AutoPas<ParticleType>>(
+      _distributedAutoPasContainer, &_distributedAutoPasContainer->localAutoPas());
 
   // The legacy RegularGridDecomposition is still used by particle loading and VTK in this
   // transitional step. Make sure it describes the same static 1D decomposition as
@@ -206,7 +204,8 @@ Simulation::Simulation(const MDFlexConfig &configuration,
   const auto &legacyLocalMin = _domainDecomposition->getLocalBoxMin();
   const auto &legacyLocalMax = _domainDecomposition->getLocalBoxMax();
   for (std::size_t d = 0; d < 3; ++d) {
-    if (std::abs(dapLocalMin[d] - legacyLocalMin[d]) > 1e-12 or std::abs(dapLocalMax[d] - legacyLocalMax[d]) > 1e-12) {
+    if (std::abs(dapLocalMin[d] - legacyLocalMin[d]) > 1e-12 or
+        std::abs(dapLocalMax[d] - legacyLocalMax[d]) > 1e-12) {
       throw std::runtime_error(
           "DistributedAutoPas and md-flexible use different local domains. "
           "The current integration step requires a static 1D decomposition along x.");
@@ -227,12 +226,12 @@ Simulation::Simulation(const MDFlexConfig &configuration,
 
   if (_configuration.useThermostat.value and _configuration.deltaT.value != 0) {
     if (_configuration.addBrownianMotion.value) {
-      Thermostat::addBrownianMotion(*_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
+      Thermostat::addBrownianMotion(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
                                     _configuration.initTemperature.value);
     }
 
     // Set the simulation directly to the desired initial temperature.
-    Thermostat::apply(*_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
+    Thermostat::apply(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
                       _configuration.initTemperature.value, std::numeric_limits<double>::max());
   }
 
@@ -489,8 +488,8 @@ void Simulation::updateVelocities() {
 
   if (deltaT != 0) {
     _timers.velocityUpdate.start();
-    TimeDiscretization::calculateVelocities(*_distributedAutoPasContainer,
-                                            *(_configuration.getParticlePropertiesLibrary()), deltaT);
+    TimeDiscretization::calculateVelocities(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
+                                            deltaT);
     _timers.velocityUpdate.stop();
   }
 }
@@ -499,21 +498,23 @@ void Simulation::updateAngularVelocities() {
   const double deltaT = _configuration.deltaT.value;
 
   _timers.angularVelocityUpdate.start();
-  TimeDiscretization::calculateAngularVelocities(*_distributedAutoPasContainer,
-                                                 *(_configuration.getParticlePropertiesLibrary()), deltaT);
+  TimeDiscretization::calculateAngularVelocities(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
+                                                 deltaT);
   _timers.angularVelocityUpdate.stop();
 }
 
 void Simulation::updateThermostat() {
   if (_configuration.useThermostat.value and (_iteration % _configuration.thermostatInterval.value) == 0) {
     _timers.thermostat.start();
-    Thermostat::apply(*_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
+    Thermostat::apply(*_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
                       _configuration.targetTemperature.value, _configuration.deltaTemp.value);
     _timers.thermostat.stop();
   }
 }
 
-long Simulation::accumulateTime(const long &time) { return _distributedAutoPasContainer->globalSum(time); }
+long Simulation::accumulateTime(const long &time) {
+  return _distributedAutoPasContainer->globalSum(time);
+}
 
 bool Simulation::calculatePairwiseForces() {
   const auto wasTuningIteration = applyWithChosenFunctor<bool>([&](auto &&functor) {
@@ -540,7 +541,8 @@ bool Simulation::calculateTriwiseForces() {
 }
 
 void Simulation::calculateGlobalForces(const std::array<double, 3> &globalForce) {
-  _distributedAutoPasContainer->applyToOwnedParticles([&](auto &particle) { particle.addF(globalForce); });
+  _distributedAutoPasContainer->applyToOwnedParticles(
+      [&](auto &particle) { particle.addF(globalForce); });
 }
 
 void Simulation::logSimulationState() {
@@ -651,8 +653,9 @@ void Simulation::logMeasurements() {
               << (static_cast<double>(_numTuningIterations) / static_cast<double>(_iteration) * 100.) << "%"
               << "\n";
 
-    auto mfups = static_cast<double>(_distributedAutoPasContainer->getLocalNumberOfOwnedParticles() * _iteration) *
-                 1e-6 / (static_cast<double>(forceUpdateTotal) * 1e-9);  // 1e-9 for ns to s, 1e-6 for M in MFUPs
+    auto mfups =
+        static_cast<double>(_distributedAutoPasContainer->getLocalNumberOfOwnedParticles() * _iteration) *
+        1e-6 / (static_cast<double>(forceUpdateTotal) * 1e-9);  // 1e-9 for ns to s, 1e-6 for M in MFUPs
     std::cout << "MFUPs/sec                          : " << mfups << "\n";
 #ifdef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
     std::cout << "Mean Rebuild Frequency               : "
@@ -759,17 +762,15 @@ void Simulation::loadParticles() {
   const auto numParticlesInConfigGlobal = _distributedAutoPasContainer->globalSum(numParticlesInConfigLocally);
 
   if (_distributedAutoPasContainer->isRoot()) {
-    std::cout << "Number of particles at initialization globally" << std::setw(std::to_string(numberOfRanks).length())
-              << ""
-              << ": " << numParticlesAddedGlobal << "\n";
+    std::cout << "Number of particles at initialization globally"
+              << std::setw(std::to_string(numberOfRanks).length()) << "" << ": " << numParticlesAddedGlobal << "\n";
 
     if (numParticlesAddedGlobal != numParticlesInConfigGlobal) {
       throw std::runtime_error(
           "Simulation::loadParticles(): "
           "Not all particles from the configuration file could be added to DistributedAutoPas!\n"
           "Configuration : " +
-          std::to_string(numParticlesInConfigGlobal) +
-          "\n"
+          std::to_string(numParticlesInConfigGlobal) + "\n"
           "Added globally: " +
           std::to_string(numParticlesAddedGlobal));
     }
