@@ -27,8 +27,8 @@ namespace dap {
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class DistributedAutoPas {
  public:
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff)
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                     const std::array<double, 3> &globalMax, double cutoff)
       : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, [](auto &) {}) {}
 
   /**
@@ -38,8 +38,8 @@ class DistributedAutoPas {
    * tuning configuration. It is intentionally separate from all distributed concerns.
    */
   template <class Configurator>
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff, Configurator &&configurator)
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                     const std::array<double, 3> &globalMax, double cutoff, Configurator &&configurator)
       : _runtime(runtime),
         _domain(runtime.communicator(), globalMin, globalMax),
         _particleMigration(runtime.communicator()),
@@ -150,9 +150,13 @@ class DistributedAutoPas {
    * New code should not use this method. It will be removed once those helpers consume
    * the DistributedAutoPas particle API directly.
    */
-  [[nodiscard]] autopas::AutoPas<Particle> &localAutoPas() { return _autoPas; }
+  [[nodiscard]] autopas::AutoPas<Particle> &localAutoPas() {
+    return _autoPas;
+  }
 
-  [[nodiscard]] const autopas::AutoPas<Particle> &localAutoPas() const { return _autoPas; }
+  [[nodiscard]] const autopas::AutoPas<Particle> &localAutoPas() const {
+    return _autoPas;
+  }
 
  private:
   void synchronizeParticles() {

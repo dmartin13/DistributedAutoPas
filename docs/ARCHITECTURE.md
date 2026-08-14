@@ -58,3 +58,10 @@ NVSHMEM for GPU-resident particle data.
 - halo exchange currently uses the cutoff width only
 - `localAutoPas()` is still used by legacy md-flexible helpers
 - MPI is the only communication backend
+
+## Bundled example application
+
+The adapted md-flexible simulator lives in `examples/md-flexible`. It is built
+as an application of DistributedAutoPas and may still depend on AutoPas for
+particle types and interaction functors. Distributed communication is intended
+to move behind the DistributedAutoPas API incrementally.

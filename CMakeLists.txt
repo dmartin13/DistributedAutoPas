@@ -1,8 +1,34 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(distributed_autopas LANGUAGES CXX)
+project(distributed_autopas LANGUAGES C CXX)
 
-find_package(MPI REQUIRED)
+# MPI is the communication backend of the current prototype. Finding it at the
+# project root makes MPI::MPI_CXX visible to all bundled examples as well.
+find_package(MPI REQUIRED COMPONENTS CXX)
+
+# Build examples by default for a standalone DistributedAutoPas checkout, but
+# not when the project is embedded into another superbuild.
+set(_dap_build_examples_default OFF)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_dap_build_examples_default ON)
+endif()
+option(
+    DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES
+    "Build DistributedAutoPas examples"
+    ${_dap_build_examples_default}
+)
+
+# The bundled md-flexible example currently supports the single-site particle
+# model only. This value has to be known while AutoPas' applicationLibrary is
+# configured.
+if(DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES)
+    set(MD_FLEXIBLE_MODE "SINGLESITE" CACHE STRING "md-flexible particle mode")
+    if(NOT MD_FLEXIBLE_MODE STREQUAL "SINGLESITE")
+        message(FATAL_ERROR
+            "The bundled DistributedAutoPas md-flexible example currently supports MD_FLEXIBLE_MODE=SINGLESITE only."
+        )
+    endif()
+endif()
 
 # DistributedAutoPas can either be built standalone or as part of a larger
 # CMake build that has already configured AutoPas.
@@ -22,9 +48,9 @@ if(NOT TARGET autopas)
         )
     endif()
 
-    # DistributedAutoPas' own standalone build does not need the AutoPas
-    # examples/tests. Energy measurements are disabled for the prototype so
-    # that PMT/RAPL does not require access to energy_uj.
+    # DistributedAutoPas does not need AutoPas' own examples/tests. Energy
+    # measurements are disabled for the prototype so PMT/RAPL does not require
+    # access to energy_uj on development systems.
     set(AUTOPAS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(AUTOPAS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(AUTOPAS_ENABLE_ENERGY_MEASUREMENTS OFF CACHE BOOL "" FORCE)
@@ -52,21 +78,13 @@ target_link_libraries(
 
 target_compile_features(distributed_autopas INTERFACE cxx_std_20)
 
-# Build the local minimal test only when requested. It is ON for a standalone
-# DistributedAutoPas build and explicitly disabled by DistributedAutoPasExample.
-set(_dap_build_examples_default OFF)
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(_dap_build_examples_default ON)
-endif()
-option(
-    DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES
-    "Build DistributedAutoPas examples"
-    ${_dap_build_examples_default}
-)
-
 if(DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES)
-    add_executable(minimal_mpi examples/minimal_mpi.cpp)
-    target_link_libraries(minimal_mpi PRIVATE distributed_autopas)
+    if(NOT DEFINED AUTOPAS_SOURCE_DIR OR NOT EXISTS "${AUTOPAS_SOURCE_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "Building the bundled examples requires AUTOPAS_SOURCE_DIR to point to the AutoPas source tree."
+        )
+    endif()
+    add_subdirectory(examples)
 endif()
 
 find_program(CLANG_FORMAT_EXE clang-format-14)
@@ -77,6 +95,7 @@ if(CLANG_FORMAT_EXE)
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.h"
     )
 
     # Use a project-specific target name so this is safe when AutoPas and
