@@ -94,7 +94,7 @@ Simulation::Simulation(const MDFlexConfig &configuration,
   // only create the writer if necessary since this also creates the output dir
   if (not configuration.vtkFileName.value.empty()) {
     _vtkWriter.emplace(_configuration.vtkFileName.value, _configuration.vtkOutputFolder.value,
-                       std::to_string(_configuration.iterations.value).size());
+                       std::to_string(_configuration.iterations.value).size(), runtime);
   }
 
   const auto rank = runtime.rank();
@@ -136,9 +136,8 @@ Simulation::Simulation(const MDFlexConfig &configuration,
     std::cout << "WARNING: No functor was specified. Defaulting to " << functorName << std::endl;
   }
 
-  // DistributedAutoPas owns the local AutoPas instance. For this first integration step
-  // md-flexible still uses a temporary alias to that local instance for node-local helper
-  // routines. Distributed synchronization itself is handled by DistributedAutoPas.
+  // DistributedAutoPas owns the node-local AutoPas instance. md-flexible interacts
+  // only with the distributed particle API and does not access the local container directly.
   _distributedAutoPasContainer = std::make_shared<DistributedContainerType>(
       runtime, _configuration.boxMin.value, _configuration.boxMax.value, _configuration.cutoff.value,
       [&](auto &autoPas) {
@@ -190,11 +189,6 @@ Simulation::Simulation(const MDFlexConfig &configuration,
         autoPas.setSoASortingThreshold(_configuration.soaSortingThreshold.value);
         autoPas.setOutputSuffix(outputSuffix);
       });
-
-  // Transitional alias for the legacy VTK writer. No second AutoPas object is created.
-  // Both pointers share the lifetime of the DistributedAutoPas object.
-  _autoPasContainer = std::shared_ptr<autopas::AutoPas<ParticleType>>(
-      _distributedAutoPasContainer, &_distributedAutoPasContainer->localAutoPas());
 
   // The legacy RegularGridDecomposition is still used by particle loading and VTK in this
   // transitional step. Make sure it describes the same static 1D decomposition as
@@ -253,7 +247,7 @@ void Simulation::run() {
   while (needsMoreIterations()) {
     if (_vtkWriter.has_value() and _iteration % _configuration.vtkWriteFrequency.value == 0) {
       _timers.vtk.start();
-      _vtkWriter->recordTimestep(_iteration, *_autoPasContainer, *_domainDecomposition);
+      _vtkWriter->recordTimestep(_iteration, *_distributedAutoPasContainer, *_domainDecomposition);
       _timers.vtk.stop();
     }
 
@@ -313,7 +307,7 @@ void Simulation::run() {
 
   // Record last state of simulation.
   if (_vtkWriter.has_value()) {
-    _vtkWriter->recordTimestep(_iteration, *_autoPasContainer, *_domainDecomposition);
+    _vtkWriter->recordTimestep(_iteration, *_distributedAutoPasContainer, *_domainDecomposition);
   }
 }
 

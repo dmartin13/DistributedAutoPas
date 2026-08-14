@@ -12,38 +12,25 @@
 #include <string>
 #include <utility>
 
-#include "autopas/utils/WrapMPI.h"
 
 ParallelVtkWriter::ParallelVtkWriter(std::string sessionName, const std::string &outputFolder,
-                                     const int &maximumNumberOfDigitsInIteration)
-    : _sessionName(std::move(sessionName)), _maximumNumberOfDigitsInIteration(maximumNumberOfDigitsInIteration) {
-  autopas::AutoPas_MPI_Comm_size(AUTOPAS_MPI_COMM_WORLD, &_numberOfRanks);
-  autopas::AutoPas_MPI_Comm_rank(AUTOPAS_MPI_COMM_WORLD, &_mpiRank);
-
-  if (_mpiRank == 0) {
+                                     const int &maximumNumberOfDigitsInIteration, dap::Runtime &runtime)
+    : _numberOfRanks(runtime.size()),
+      _rank(runtime.rank()),
+      _sessionName(std::move(sessionName)),
+      _maximumNumberOfDigitsInIteration(maximumNumberOfDigitsInIteration) {
+  if (runtime.isRoot()) {
     tryCreateSessionAndDataFolders(_sessionName, outputFolder);
   }
 
-  int sessionFolderPathLength = static_cast<int>(_sessionFolderPath.size());
-  autopas::AutoPas_MPI_Bcast(&sessionFolderPathLength, 1, AUTOPAS_MPI_INT, 0, AUTOPAS_MPI_COMM_WORLD);
-
-  int dataFolderPathLength = static_cast<int>(_dataFolderPath.size());
-  autopas::AutoPas_MPI_Bcast(&dataFolderPathLength, 1, AUTOPAS_MPI_INT, 0, AUTOPAS_MPI_COMM_WORLD);
-
-  if (_mpiRank != 0) {
-    _sessionFolderPath.resize(sessionFolderPathLength);
-    _dataFolderPath.resize(dataFolderPathLength);
-  }
-
-  autopas::AutoPas_MPI_Bcast(_sessionFolderPath.data(), sessionFolderPathLength, AUTOPAS_MPI_CHAR, 0,
-                             AUTOPAS_MPI_COMM_WORLD);
-  autopas::AutoPas_MPI_Bcast(_dataFolderPath.data(), dataFolderPathLength, AUTOPAS_MPI_CHAR, 0, AUTOPAS_MPI_COMM_WORLD);
+  runtime.broadcastString(_sessionFolderPath);
+  runtime.broadcastString(_dataFolderPath);
 }
 
-void ParallelVtkWriter::recordTimestep(size_t currentIteration, const autopas::AutoPas<ParticleType> &autoPasContainer,
+void ParallelVtkWriter::recordTimestep(size_t currentIteration, const DistributedContainerType &particleContainer,
                                        const RegularGridDecomposition &decomposition) const {
-  recordParticleStates(currentIteration, autoPasContainer);
-  const auto currentConfig = autoPasContainer.getCurrentConfigs();
+  recordParticleStates(currentIteration, particleContainer);
+  const auto currentConfig = particleContainer.getCurrentLocalConfigurations();
   recordDomainSubdivision(currentIteration, currentConfig, decomposition);
 }
 
@@ -53,8 +40,8 @@ void ParallelVtkWriter::recordTimestep(size_t currentIteration, const autopas::A
  * The streams can be combined to a single output stream after iterating over the particles, once.
  */
 void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
-                                             const autopas::AutoPas<ParticleType> &autoPasContainer) const {
-  if (_mpiRank == 0) {
+                                             const DistributedContainerType &particleContainer) const {
+  if (_rank == 0) {
     createParticlesPvtuFile(currentIteration);
   }
 
@@ -68,7 +55,7 @@ void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
     throw std::runtime_error("Simulation::writeVTKFile(): Failed to open file \"" + timestepFileName.str() + "\"");
   }
 
-  const auto numberOfParticles = autoPasContainer.getNumberOfParticles(autopas::IteratorBehavior::owned);
+  const auto numberOfParticles = particleContainer.getLocalNumberOfOwnedParticles();
 
   timestepFile << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n";
   timestepFile << "<VTKFile byte_order=\"LittleEndian\" type=\"UnstructuredGrid\" version=\"0.1\">\n";
@@ -79,60 +66,58 @@ void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
   // print velocities
   timestepFile
       << "        <DataArray Name=\"velocities\" NumberOfComponents=\"3\" format=\"ascii\" type=\"Float32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    const auto v = particle->getV();
+  particleContainer.forEachOwnedParticle([&](const auto &particle) {
+    const auto v = particle.getV();
     timestepFile << "        " << v[0] << " " << v[1] << " " << v[2] << "\n";
-  }
+  });
   timestepFile << "        </DataArray>\n";
 
   // print forces
   timestepFile << "        <DataArray Name=\"forces\" NumberOfComponents=\"3\" format=\"ascii\" type=\"Float32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    const auto f = particle->getF();
+  particleContainer.forEachOwnedParticle([&](const auto &particle) {
+    const auto f = particle.getF();
     timestepFile << "        " << f[0] << " " << f[1] << " " << f[2] << "\n";
-  }
+  });
   timestepFile << "        </DataArray>\n";
 
 #if MD_FLEXIBLE_MODE == MULTISITE
   // print quaternions
   timestepFile
       << "        <DataArray Name=\"quaternions\" NumberOfComponents=\"4\" format=\"ascii\" type=\"Float32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    const auto q = particle->getQuaternion();
+  particleContainer.forEachOwnedParticle([&](const auto &particle) {
+    const auto q = particle.getQuaternion();
     timestepFile << "        " << q[0] << " " << q[1] << " " << q[2] << " " << q[3] << "\n";
-  }
+  });
   timestepFile << "        </DataArray>\n";
 
   // print angular velocities
   timestepFile
       << "        <DataArray Name=\"angularVelocities\" NumberOfComponents=\"3\" format=\"ascii\" type=\"Float32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    const auto angVel = particle->getAngularVel();
+  particleContainer.forEachOwnedParticle([&](const auto &particle) {
+    const auto angVel = particle.getAngularVel();
     timestepFile << "        " << angVel[0] << " " << angVel[1] << " " << angVel[2] << "\n";
-  }
+  });
   timestepFile << "        </DataArray>\n";
 
   // print torques
   timestepFile << "        <DataArray Name=\"torques\" NumberOfComponents=\"3\" format=\"ascii\" type=\"Float32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    const auto torque = particle->getTorque();
+  particleContainer.forEachOwnedParticle([&](const auto &particle) {
+    const auto torque = particle.getTorque();
     timestepFile << "        " << torque[0] << " " << torque[1] << " " << torque[2] << "\n";
-  }
+  });
   timestepFile << "        </DataArray>\n";
 #endif
 
   // print type ids
   timestepFile << "        <DataArray Name=\"typeIds\" NumberOfComponents=\"1\" format=\"ascii\" type=\"Int32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    timestepFile << "        " << particle->getTypeId() << "\n";
-  }
+  particleContainer.forEachOwnedParticle(
+      [&](const auto &particle) { timestepFile << "        " << particle.getTypeId() << "\n"; });
   timestepFile << "        </DataArray>\n";
 
   // print ids
   timestepFile << "        <DataArray Name=\"ids\" NumberOfComponents=\"1\" format=\"ascii\" type=\"Int32\">\n";
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
-    timestepFile << "        " << particle->getID() << "\n";
-  }
+  particleContainer.forEachOwnedParticle(
+      [&](const auto &particle) { timestepFile << "        " << particle.getID() << "\n"; });
   timestepFile << "        </DataArray>\n";
 
   timestepFile << "      </PointData>\n";
@@ -141,8 +126,8 @@ void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
 
   // print positions
   timestepFile << "        <DataArray Name=\"positions\" NumberOfComponents=\"3\" format=\"ascii\" type=\"Float32\">\n";
-  const auto boxMax = autoPasContainer.getBoxMax();
-  for (auto particle = autoPasContainer.begin(autopas::IteratorBehavior::owned); particle.isValid(); ++particle) {
+  const auto &boxMax = particleContainer.localBoxMax();
+  particleContainer.forEachOwnedParticle([&](const auto &particle) {
     // When we write to the file in ASCII, values are rounded to the precision of the filestream.
     // Since a higher precision results in larger files because more characters are written,
     // and mdflex is not intended as a perfectly precice tool for application scientists,
@@ -171,7 +156,7 @@ void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
                 std::to_string(machinePrecision) +
                 " digits of precision!\n"
                 "Number: " +
-                std::to_string(position) + "\n" + particle->toString());
+                std::to_string(position) + "\n" + particle.toString());
           }
         }
       }
@@ -179,7 +164,7 @@ void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
       timestepFile << position << std::setprecision(initialPrecision);
     };
 
-    const auto pos = particle->getR();
+    const auto pos = particle.getR();
     timestepFile << "        ";
     writeWithDynamicPrecision(pos[0], boxMax[0]);
     timestepFile << " ";
@@ -187,7 +172,7 @@ void ParallelVtkWriter::recordParticleStates(size_t currentIteration,
     timestepFile << " ";
     writeWithDynamicPrecision(pos[2], boxMax[2]);
     timestepFile << "\n";
-  }
+  });
   timestepFile << "        </DataArray>\n";
 
   timestepFile << "      </Points>\n";
@@ -211,7 +196,7 @@ void ParallelVtkWriter::recordDomainSubdivision(
   interactionTypes.reserve(autoPasConfigurations.size());
   std::transform(autoPasConfigurations.begin(), autoPasConfigurations.end(),
                  std::inserter(interactionTypes, interactionTypes.end()), [&](const auto &pair) { return pair.first; });
-  if (_mpiRank == 0) {
+  if (_rank == 0) {
     createRanksPvtuFile(currentIteration, decomposition, interactionTypes);
   }
 
@@ -262,7 +247,7 @@ void ParallelVtkWriter::recordDomainSubdivision(
     printDataArray(static_cast<int>(triwiseConfig.newton3), "Int32", "Newton3-3B");
   }
 
-  printDataArray(_mpiRank, "Int32", "Rank");
+  printDataArray(_rank, "Int32", "Rank");
   timestepFile << "      </CellData>\n";
   timestepFile << "      <Points>\n";
   timestepFile << "        <DataArray type=\"Float32\" NumberOfComponents=\"3\" format=\"ascii\">\n";
@@ -437,6 +422,6 @@ void ParallelVtkWriter::tryCreateFolder(const std::string &name, const std::stri
 
 void ParallelVtkWriter::generateFilename(const std::string &tag, const std::string &fileExtension,
                                          size_t currentIteration, std::ostringstream &filenameStream) const {
-  filenameStream << _dataFolderPath << _sessionName << "_" << tag << "_" << _mpiRank << "_" << std::setfill('0')
+  filenameStream << _dataFolderPath << _sessionName << "_" << tag << "_" << _rank << "_" << std::setfill('0')
                  << std::setw(_maximumNumberOfDigitsInIteration) << currentIteration << "." << fileExtension;
 }

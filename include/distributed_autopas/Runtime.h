@@ -3,6 +3,7 @@
 #include <mpi.h>
 
 #include <cstddef>
+#include <string>
 #include <type_traits>
 
 namespace dap {
@@ -69,6 +70,14 @@ class Runtime {
   [[nodiscard]] int rank() const;
   [[nodiscard]] int size() const;
   [[nodiscard]] bool isRoot() const;
+
+  /**
+   * Broadcast a string from one process to all processes in this runtime.
+   *
+   * This keeps backend-specific communication out of application utilities such
+   * as the VTK writer.
+   */
+  void broadcastString(std::string &value, int rootRank = 0) const;
 
  private:
   template <class Particle, class Serializer>

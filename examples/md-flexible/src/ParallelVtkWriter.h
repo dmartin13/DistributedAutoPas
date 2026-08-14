@@ -11,24 +11,28 @@
 #include <string>
 #include <unordered_set>
 
-#include "autopas/AutoPas.h"
+#include "distributed_autopas/DistributedAutoPas.h"
+#include "distributed_autopas/Runtime.h"
 #include "autopas/tuning/Configuration.h"
 #include "src/TypeDefinitions.h"
 #include "src/domainDecomposition/RegularGridDecomposition.h"
+#include "src/distributed/MoleculeLJParticleSerializer.h"
 
 /**
- * The ParallelVtkWriter can be used to create vtk-files for MPI parallel processes.
+ * The ParallelVtkWriter creates VTK files for a distributed simulation.
  */
 class ParallelVtkWriter {
  public:
+  using DistributedContainerType = dap::DistributedAutoPas<ParticleType>;
   /**
    * Constructor.
    * @param sessionName Sets the prefix for every created folder / file.
    * @param outputFolder Sets the folder where the vtk files will be created.
    * @param maximumNumberOfDigitsInIteration The maximum number of digits an iteration index can have.
+   * @param runtime DistributedAutoPas runtime used for rank information and collective coordination.
    */
   ParallelVtkWriter(std::string sessionName, const std::string &outputFolder,
-                    const int &maximumNumberOfDigitsInIteration);
+                    const int &maximumNumberOfDigitsInIteration, dap::Runtime &runtime);
 
   /**
    * Destructor.
@@ -38,10 +42,10 @@ class ParallelVtkWriter {
   /**
    * Writes the current state of particles and the current domain subdivision into vtk files.
    * @param currentIteration The simulation's current iteration.
-   * @param autoPasContainer The AutoPas container whose owned particles will be logged.
+   * @param particleContainer The distributed particle container whose owned particles will be logged.
    * @param decomposition: The decomposition of the global domain.
    */
-  void recordTimestep(size_t currentIteration, const autopas::AutoPas<ParticleType> &autoPasContainer,
+  void recordTimestep(size_t currentIteration, const DistributedContainerType &particleContainer,
                       const RegularGridDecomposition &decomposition) const;
 
  private:
@@ -62,11 +66,10 @@ class ParallelVtkWriter {
   int _numberOfRanks{};
 
   /**
-   * Stores the MPI rank of the current process.
-   * Every process will write into it's own .vtu file, while the process with rank 0 will
-   * create the parallel .pvtu file.
+   * Stores the rank of the current process.
+   * Every process writes its own .vtu file, while rank 0 creates the parallel .pvtu file.
    */
-  int _mpiRank{};
+  int _rank{};
 
   /**
    * Stores the session name.
@@ -97,9 +100,9 @@ class ParallelVtkWriter {
   /**
    * Writes the current state of particles into vtk files.
    * @param currentIteration: The simulations current iteration.
-   * @param autoPasContainer The AutoPas container whose owned particles will be logged.
+   * @param particleContainer The distributed container whose owned particles will be logged.
    */
-  void recordParticleStates(size_t currentIteration, const autopas::AutoPas<ParticleType> &autoPasContainer) const;
+  void recordParticleStates(size_t currentIteration, const DistributedContainerType &particleContainer) const;
 
   /**
    * Writes the current domain subdivision into vtk files.

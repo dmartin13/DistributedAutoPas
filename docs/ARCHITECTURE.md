@@ -37,8 +37,9 @@ auto globalCount = particles.getGlobalNumberOfOwnedParticles();
 ```
 
 Local AutoPas iterators, halo exchange, migration, and communication contexts
-are implementation details. `localAutoPas()` remains only as a temporary escape
-hatch while md-flexible helper classes are migrated and is marked deprecated.
+are implementation details. The public API intentionally provides no access to the
+node-local AutoPas container. Diagnostics and output consume particle traversal and
+local tuning metadata through dedicated DistributedAutoPas operations.
 
 ## Runtime
 
@@ -54,10 +55,11 @@ NVSHMEM for GPU-resident particle data.
 ## Particle-local reductions
 
 Simulator components such as the thermostat express local reductions through
-`sumOwnedParticles()` and distributed reductions through `globalSum()`. They do not
-perform MPI collectives themselves. This keeps communication policy inside
-DistributedAutoPas while still allowing the simulator to define the physical
-quantity that should be accumulated.
+`sumOwnedParticles()` and distributed reductions through `globalSum()`. Output
+coordination uses backend-neutral `Runtime` operations such as `broadcastString()`.
+These components do not perform MPI collectives themselves. This keeps communication
+policy inside DistributedAutoPas while still allowing the simulator to define the
+physical quantity that should be accumulated or written.
 
 ## Current limitations
 
@@ -65,7 +67,6 @@ quantity that should be accumulated.
 - periodic migration / halo handling in x only
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
-- `localAutoPas()` is still used by the legacy md-flexible VTK writer
 - MPI is the only communication backend
 
 ## Bundled example application

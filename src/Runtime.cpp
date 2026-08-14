@@ -1,6 +1,7 @@
 #include "distributed_autopas/Runtime.h"
 
 #include <stdexcept>
+#include <string>
 
 namespace dap {
 
@@ -43,6 +44,19 @@ int Runtime::rank() const { return _rank; }
 int Runtime::size() const { return _size; }
 
 bool Runtime::isRoot() const { return _rank == 0; }
+
+void Runtime::broadcastString(std::string &value, int rootRank) const {
+  int length = static_cast<int>(value.size());
+  MPI_Bcast(&length, 1, MPI_INT, rootRank, _communicator);
+
+  if (_rank != rootRank) {
+    value.resize(static_cast<std::size_t>(length));
+  }
+
+  if (length > 0) {
+    MPI_Bcast(value.data(), length, MPI_CHAR, rootRank, _communicator);
+  }
+}
 
 MPI_Comm Runtime::communicator() const { return _communicator; }
 

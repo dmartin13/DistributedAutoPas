@@ -86,19 +86,12 @@ class Simulation {
    * This member will not be initialized by the constructor and therefore has to be initialized by the deriving class.
    */
   /**
-   * Distributed particle container.
-   *
-   * md-flexible uses this container for time integration and interaction calculation. A local
-   * AutoPas escape hatch remains temporarily only for legacy thermostat and VTK helpers.
+   * Distributed particle container used for time integration, interaction calculation,
+   * thermostat operations, and output. The simulator never accesses the node-local
+   * AutoPas container directly.
    */
   using DistributedContainerType = dap::DistributedAutoPas<ParticleType>;
   std::shared_ptr<DistributedContainerType> _distributedAutoPasContainer;
-
-  /**
-   * Temporary alias to the local AutoPas container owned by _distributedAutoPasContainer.
-   * This is currently used only by the legacy VTK writer and will be removed.
-   */
-  std::shared_ptr<autopas::AutoPas<ParticleType>> _autoPasContainer;
 
   /**
    * Shared pointer to the logfile.

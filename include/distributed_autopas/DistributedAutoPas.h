@@ -163,21 +163,14 @@ class DistributedAutoPas {
   [[nodiscard]] auto getVerletSkin() { return _autoPas.getVerletSkin(); }
   [[nodiscard]] auto getVerletRebuildFrequency() { return _autoPas.getVerletRebuildFrequency(); }
 
-  void finalize() { _autoPas.finalize(); }
-
   /**
-   * Transitional escape hatch for md-flexible output code that still has an
-   * AutoPas-specific interface (currently the VTK writer).
-   * New code should not use this method. It will be removed once those helpers consume
-   * the DistributedAutoPas particle API directly.
+   * Return the currently active node-local AutoPas configurations for diagnostics.
+   *
+   * This exposes tuning metadata without exposing the local AutoPas container itself.
    */
-  [[nodiscard]] autopas::AutoPas<Particle> &localAutoPas() {
-    return _autoPas;
-  }
+  [[nodiscard]] auto getCurrentLocalConfigurations() const { return _autoPas.getCurrentConfigs(); }
 
-  [[nodiscard]] const autopas::AutoPas<Particle> &localAutoPas() const {
-    return _autoPas;
-  }
+  void finalize() { _autoPas.finalize(); }
 
  private:
   void synchronizeParticles() {

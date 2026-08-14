@@ -1,0 +1,105 @@
+# Thermostat correctness test for DistributedAutoPas + md-flexible.
+#
+# Purpose:
+# - deterministic initial velocities (no Brownian motion)
+# - no pair interactions (cutoff smaller than every particle distance)
+# - thermostat needs a GLOBAL temperature because the velocity distribution
+#   differs between MPI subdomains
+# - after initialization T = 1.0
+# - after the first thermostat application T = 1.5
+#
+# Run once with 1 rank and once with 4 ranks and compare the final VTK output.
+
+container: [DirectSum]
+traversal: [ds_sequential]
+data-layout: [AoS]
+newton3: [enabled]
+functor: lennard-jones
+
+cutoff: 0.5
+verlet-skin-radius: 0.0
+tuning-strategies: []
+tuning-phases: 0
+
+box-min: [0.0, 0.0, 0.0]
+box-max: [8.6, 8.0, 8.0]
+
+# Must be non-zero because md-flexible only initializes/applies the thermostat
+# for deltaT != 0. It is tiny so positions are effectively unchanged.
+deltaT: 0.000001
+iterations: 1
+
+boundary-type: [periodic, none, none]
+subdivide-dimension: [true, false, false]
+load-balancer: None
+
+thermostat:
+  initialTemperature: 1.0
+  targetTemperature: 2.0
+  deltaTemperature: 0.5
+  thermostatInterval: 1
+  addBrownianMotion: false
+
+vtk-filename: dapThermostatCompare
+vtk-write-frequency: 1
+no-progress-bar: true
+no-end-config: true
+
+Sites:
+  0:
+    epsilon: 1.0
+    sigma: 1.0
+    mass: 1.0
+
+# One particle per object. The velocities deliberately differ strongly between
+# particles/ranks so a local-only thermostat implementation would be visible.
+Objects:
+  CubeGrid:
+    0:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [0.4, 4.0, 4.0]
+      velocity: [1.0, 0.0, 0.0]
+      particle-type-id: 0
+    1:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [1.4, 4.0, 4.0]
+      velocity: [0.0, 2.0, 0.0]
+      particle-type-id: 0
+    2:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [2.7, 4.0, 4.0]
+      velocity: [0.0, 0.0, 3.0]
+      particle-type-id: 0
+    3:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [3.7, 4.0, 4.0]
+      velocity: [-1.0, 1.0, 0.0]
+      particle-type-id: 0
+    4:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [4.9, 4.0, 4.0]
+      velocity: [2.0, -1.0, 0.0]
+      particle-type-id: 0
+    5:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [5.9, 4.0, 4.0]
+      velocity: [0.0, -2.0, 1.0]
+      particle-type-id: 0
+    6:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [7.2, 4.0, 4.0]
+      velocity: [-3.0, 0.0, 1.0]
+      particle-type-id: 0
+    7:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 1.0
+      bottomLeftCorner: [8.2, 4.0, 4.0]
+      velocity: [1.0, 1.0, -2.0]
+      particle-type-id: 0
