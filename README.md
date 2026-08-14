@@ -9,7 +9,8 @@ interaction traversal.
 
 ```text
 DistributedAutoPas/
-├── include/distributed_autopas/   # DistributedAutoPas library
+├── include/distributed_autopas/   # public headers and template code
+├── src/                           # compiled non-template implementation
 ├── examples/
 │   ├── minimal_mpi.cpp            # small integration example
 │   └── md-flexible/               # md-flexible example application

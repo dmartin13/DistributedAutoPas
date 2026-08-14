@@ -5,6 +5,7 @@
  */
 #include "TimeDiscretization.h"
 
+#include <atomic>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -13,69 +14,61 @@
 #include "autopas/utils/WrapOpenMP.h"
 
 namespace TimeDiscretization {
+namespace {
 
-void calculatePositionsAndResetForces(autopas::AutoPas<ParticleType> &autoPasContainer,
-                                      const ParticlePropertiesLibraryType &particlePropertiesLibrary,
-                                      const double &deltaT, const std::array<double, 3> &globalForce,
-                                      bool fastParticlesThrow) {
-  using autopas::utils::ArrayUtils::operator<<;
+#ifndef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
+bool updatePositionAndResetForces(ParticleType &particle,
+                                  const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double deltaT,
+                                  const std::array<double, 3> &globalForce, const double maxAllowedDistanceMoved,
+                                  const double maxAllowedDistanceMovedSquared) {
   using autopas::utils::ArrayMath::dot;
   using namespace autopas::utils::ArrayMath::literals;
-#ifdef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
-  AUTOPAS_OPENMP(parallel)
-#else
-  const auto maxAllowedDistanceMoved =
-      autoPasContainer.getVerletSkin() / autoPasContainer.getVerletRebuildFrequency() / 2.;
-  const auto maxAllowedDistanceMovedSquared = maxAllowedDistanceMoved * maxAllowedDistanceMoved;
 
-  bool throwException = false;
+  const auto m = particlePropertiesLibrary.getMolMass(particle.getTypeId());
+  auto v = particle.getV();
+  auto f = particle.getF();
+  particle.setOldF(f);
+  particle.setF(globalForce);
+  v *= deltaT;
+  f *= (deltaT * deltaT / (2 * m));
+  const auto displacement = v + f;
 
-  AUTOPAS_OPENMP(parallel reduction(|| : throwException))
-#endif
-  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
-    const auto m = particlePropertiesLibrary.getMolMass(iter->getTypeId());
-    auto v = iter->getV();
-    auto f = iter->getF();
-    iter->setOldF(f);
-    iter->setF(globalForce);
-    v *= deltaT;
-    f *= (deltaT * deltaT / (2 * m));
-    const auto displacement = v + f;
-#ifdef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
-    iter->addR(displacement);
-#else
-    // Sanity check that particles are not too fast for the Verlet skin technique. Only makes sense if skin > 0.
-    if (not iter->addRDistanceCheck(displacement, maxAllowedDistanceMovedSquared) and
-        maxAllowedDistanceMovedSquared > 0) {
-      const auto distanceMoved = std::sqrt(dot(displacement, displacement));
-      // If this condition is violated once this is not necessarily an error. Only if the total distance traveled over
-      // the whole rebuild frequency is farther than the skin we lose interactions.
-      AUTOPAS_OPENMP(critical)
-      std::cerr << "A particle moved farther than verletSkinPerTimestep/2: " << distanceMoved << " > "
-                << autoPasContainer.getVerletSkin() / autoPasContainer.getVerletRebuildFrequency()
-                << "/2 = " << maxAllowedDistanceMoved << "\n"
-                << *iter << "\nNew Position: " << iter->getR() + displacement << std::endl;
-      if (fastParticlesThrow) {
-        throwException = true;
-      }
-    }
-#endif
+  if (not particle.addRDistanceCheck(displacement, maxAllowedDistanceMovedSquared) and
+      maxAllowedDistanceMovedSquared > 0) {
+    const auto distanceMoved = std::sqrt(dot(displacement, displacement));
+    AUTOPAS_OPENMP(critical)
+    std::cerr << "A particle moved farther than verletSkinPerTimestep/2: " << distanceMoved << " > "
+              << maxAllowedDistanceMoved << "\n"
+              << particle << "\nNew Position: " << particle.getR() + displacement << std::endl;
+    return true;
   }
-#ifndef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
-  if (throwException) {
-    throw std::runtime_error("At least one particle was too fast!");
-  }
-#endif
+
+  return false;
 }
+#else
+void updatePositionAndResetForces(ParticleType &particle,
+                                  const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double deltaT,
+                                  const std::array<double, 3> &globalForce) {
+  using namespace autopas::utils::ArrayMath::literals;
 
-void calculateQuaternionsAndResetTorques(autopas::AutoPas<ParticleType> &autoPasContainer,
-                                         const ParticlePropertiesLibraryType &particlePropertiesLibrary,
-                                         const double &deltaT, const std::array<double, 3> &globalForce) {
+  const auto m = particlePropertiesLibrary.getMolMass(particle.getTypeId());
+  auto v = particle.getV();
+  auto f = particle.getF();
+  particle.setOldF(f);
+  particle.setF(globalForce);
+  v *= deltaT;
+  f *= (deltaT * deltaT / (2 * m));
+  particle.addR(v + f);
+}
+#endif
+
+void updateQuaternionAndResetTorque(ParticleType &particle,
+                                    const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double deltaT,
+                                    const std::array<double, 3> &globalForce) {
   using namespace autopas::utils::ArrayMath::literals;
   using autopas::utils::ArrayMath::cross;
   using autopas::utils::ArrayMath::div;
   using autopas::utils::ArrayMath::dot;
-  using autopas::utils::ArrayMath::L2Norm;
   using autopas::utils::ArrayMath::normalize;
   using autopas::utils::quaternion::qMul;
   using autopas::utils::quaternion::rotatePosition;
@@ -83,114 +76,221 @@ void calculateQuaternionsAndResetTorques(autopas::AutoPas<ParticleType> &autoPas
   using autopas::utils::quaternion::rotateVectorOfPositions;
 
 #if MD_FLEXIBLE_MODE == MULTISITE
-
   const auto halfDeltaT = 0.5 * deltaT;
-
-  const double tol = 1e-13;  // tolerance given in paper
+  const double tol = 1e-13;
   const double tolSquared = tol * tol;
 
-  AUTOPAS_OPENMP(parallel)
-  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
-    // Calculate Quaternions
-    const auto q = iter->getQuaternion();
-    const auto angVelW = iter->getAngularVel();  // angular velocity in world frame
-    const auto angVelM =
-        rotatePositionBackwards(q, angVelW);  // angular velocity in molecular frame  (equivalent to (17))
-    const auto torqueW = iter->getTorque();
-    const auto torqueM = rotatePositionBackwards(q, torqueW);  // (18)
+  const auto q = particle.getQuaternion();
+  const auto angVelW = particle.getAngularVel();
+  const auto angVelM = rotatePositionBackwards(q, angVelW);
+  const auto torqueW = particle.getTorque();
+  const auto torqueM = rotatePositionBackwards(q, torqueW);
+  const auto I = particlePropertiesLibrary.getMomentOfInertia(particle.getTypeId());
 
-    const auto I = particlePropertiesLibrary.getMomentOfInertia(iter->getTypeId());  // moment of inertia
+  const auto angMomentumM = I * angVelM;
+  const auto derivativeAngMomentumM = torqueM - cross(angVelM, angMomentumM);
+  const auto angMomentumMHalfStep = angMomentumM + derivativeAngMomentumM * halfDeltaT;
 
-    const auto angMomentumM = I * angVelM;                                                 // equivalent to (19)
-    const auto derivativeAngMomentumM = torqueM - cross(angVelM, angMomentumM);            // (20)
-    const auto angMomentumMHalfStep = angMomentumM + derivativeAngMomentumM * halfDeltaT;  // (21)
+  auto derivativeQHalfStep = qMul(q, div(angMomentumMHalfStep, I)) * 0.5;
+  auto qHalfStep = normalize(q + derivativeQHalfStep * halfDeltaT);
+  const auto angVelWHalfStep = angVelW + rotatePosition(q, torqueM / I) * halfDeltaT;
 
-    auto derivativeQHalfStep = qMul(q, div(angMomentumMHalfStep, I)) * 0.5;  // (22)
+  auto qHalfStepOld = qHalfStep;
+  qHalfStepOld[0] += 2 * tol;
 
-    auto qHalfStep = normalize(q + derivativeQHalfStep * halfDeltaT);  // (23)
-
-    const auto angVelWHalfStep = angVelW + rotatePosition(q, torqueM / I) * halfDeltaT;  // equivalent to (24)
-
-    // (25) start
-    // initialise qHalfStepOld to be outside tolerable distance from qHalfStep to satisfy while statement
-    auto qHalfStepOld = qHalfStep;
-    qHalfStepOld[0] += 2 * tol;
-
-    while (dot(qHalfStep - qHalfStepOld, qHalfStep - qHalfStepOld) > tolSquared) {
-      qHalfStepOld = qHalfStep;
-      const auto angVelMHalfStep =
-          rotatePositionBackwards(qHalfStepOld, angVelWHalfStep);  // equivalent to first two lines of (25)
-      derivativeQHalfStep = qMul(qHalfStepOld, angVelMHalfStep) * 0.5;
-      qHalfStep = normalize(q + derivativeQHalfStep * halfDeltaT);
-    }
-    // (25) end
-
-    const auto qFullStep = normalize(q + derivativeQHalfStep * deltaT);  // (26)
-
-    iter->setQuaternion(qFullStep);
-    iter->setAngularVel(angVelWHalfStep);  // save angular velocity half step, to be used by calculateAngularVelocities
-
-    // Reset torque
-    iter->setTorque({0., 0., 0.});
-    if (std::any_of(globalForce.begin(), globalForce.end(),
-                    [](double i) { return std::abs(i) > std::numeric_limits<double>::epsilon(); })) {
-      // Get torque from global force
-      const auto unrotatedSitePositions = particlePropertiesLibrary.getSitePositions(iter->getTypeId());
-      const auto rotatedSitePositions = rotateVectorOfPositions(qFullStep, unrotatedSitePositions);
-      for (size_t site = 0; site < particlePropertiesLibrary.getNumSites(iter->getTypeId()); site++) {
-        iter->addTorque(cross(rotatedSitePositions[site], globalForce));
-      }
-    }
+  while (dot(qHalfStep - qHalfStepOld, qHalfStep - qHalfStepOld) > tolSquared) {
+    qHalfStepOld = qHalfStep;
+    const auto angVelMHalfStep = rotatePositionBackwards(qHalfStepOld, angVelWHalfStep);
+    derivativeQHalfStep = qMul(qHalfStepOld, angVelMHalfStep) * 0.5;
+    qHalfStep = normalize(q + derivativeQHalfStep * halfDeltaT);
   }
 
+  const auto qFullStep = normalize(q + derivativeQHalfStep * deltaT);
+  particle.setQuaternion(qFullStep);
+  particle.setAngularVel(angVelWHalfStep);
+
+  particle.setTorque({0., 0., 0.});
+  if (std::any_of(globalForce.begin(), globalForce.end(),
+                  [](double i) { return std::abs(i) > std::numeric_limits<double>::epsilon(); })) {
+    const auto unrotatedSitePositions = particlePropertiesLibrary.getSitePositions(particle.getTypeId());
+    const auto rotatedSitePositions = rotateVectorOfPositions(qFullStep, unrotatedSitePositions);
+    for (size_t site = 0; site < particlePropertiesLibrary.getNumSites(particle.getTypeId()); site++) {
+      particle.addTorque(cross(rotatedSitePositions[site], globalForce));
+    }
+  }
 #else
+  (void)particle;
+  (void)particlePropertiesLibrary;
+  (void)deltaT;
+  (void)globalForce;
   autopas::utils::ExceptionHandler::exception(
       "Attempting to perform rotational integrations when md-flexible has not been compiled with multi-site support!");
 #endif
 }
 
-void calculateVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
-                         const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT) {
-  // helper declarations for operations with vector
+void updateVelocity(ParticleType &particle, const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                    const double deltaT) {
   using namespace autopas::utils::ArrayMath::literals;
 
-  AUTOPAS_OPENMP(parallel)
-  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
-    const auto molecularMass = particlePropertiesLibrary.getMolMass(iter->getTypeId());
-    const auto force = iter->getF();
-    const auto oldForce = iter->getOldF();
-    const auto changeInVel = (force + oldForce) * (deltaT / (2 * molecularMass));
-    iter->addV(changeInVel);
-  }
+  const auto molecularMass = particlePropertiesLibrary.getMolMass(particle.getTypeId());
+  const auto force = particle.getF();
+  const auto oldForce = particle.getOldF();
+  const auto changeInVel = (force + oldForce) * (deltaT / (2 * molecularMass));
+  particle.addV(changeInVel);
 }
 
-void calculateAngularVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
-                                const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT) {
+void updateAngularVelocity(ParticleType &particle, const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                           const double deltaT) {
   using namespace autopas::utils::ArrayMath::literals;
   using autopas::utils::quaternion::rotatePosition;
   using autopas::utils::quaternion::rotatePositionBackwards;
 
 #if MD_FLEXIBLE_MODE == MULTISITE
+  const auto torqueW = particle.getTorque();
+  const auto q = particle.getQuaternion();
+  const auto I = particlePropertiesLibrary.getMomentOfInertia(particle.getTypeId());
+  const auto torqueM = rotatePositionBackwards(q, torqueW);
+  const auto torqueDivMoIM = torqueM / I;
+  const auto torqueDivMoIW = rotatePosition(q, torqueDivMoIM);
+  particle.addAngularVel(torqueDivMoIW * 0.5 * deltaT);
+#else
+  (void)particle;
+  (void)particlePropertiesLibrary;
+  (void)deltaT;
+  autopas::utils::ExceptionHandler::exception(
+      "Attempting to perform rotational integrations when md-flexible has not been compiled with multi-site support!");
+#endif
+}
+
+}  // namespace
+
+void calculatePositionsAndResetForces(dap::DistributedAutoPas<ParticleType> &container,
+                                      const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                                      const double &deltaT, const std::array<double, 3> &globalForce,
+                                      bool fastParticlesThrow) {
+#ifdef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
+  container.applyToOwnedParticles(
+      [&](auto &particle) { updatePositionAndResetForces(particle, particlePropertiesLibrary, deltaT, globalForce); });
+#else
+  const auto maxAllowedDistanceMoved = container.getVerletSkin() / container.getVerletRebuildFrequency() / 2.;
+  const auto maxAllowedDistanceMovedSquared = maxAllowedDistanceMoved * maxAllowedDistanceMoved;
+  std::atomic_bool particleTooFast{false};
+
+  container.applyToOwnedParticles([&](auto &particle) {
+    if (updatePositionAndResetForces(particle, particlePropertiesLibrary, deltaT, globalForce, maxAllowedDistanceMoved,
+                                     maxAllowedDistanceMovedSquared)) {
+      particleTooFast.store(true, std::memory_order_relaxed);
+    }
+  });
+
+  if (particleTooFast.load(std::memory_order_relaxed) and fastParticlesThrow) {
+    throw std::runtime_error("At least one particle was too fast!");
+  }
+#endif
+}
+
+void calculatePositionsAndResetForces(autopas::AutoPas<ParticleType> &autoPasContainer,
+                                      const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                                      const double &deltaT, const std::array<double, 3> &globalForce,
+                                      bool fastParticlesThrow) {
+#ifdef AUTOPAS_ENABLE_DYNAMIC_CONTAINERS
+  AUTOPAS_OPENMP(parallel)
+  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+    updatePositionAndResetForces(*iter, particlePropertiesLibrary, deltaT, globalForce);
+  }
+#else
+  const auto maxAllowedDistanceMoved =
+      autoPasContainer.getVerletSkin() / autoPasContainer.getVerletRebuildFrequency() / 2.;
+  const auto maxAllowedDistanceMovedSquared = maxAllowedDistanceMoved * maxAllowedDistanceMoved;
+  std::atomic_bool particleTooFast{false};
 
   AUTOPAS_OPENMP(parallel)
   for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
-    const auto torqueW = iter->getTorque();
-    const auto q = iter->getQuaternion();
-    const auto I = particlePropertiesLibrary.getMomentOfInertia(iter->getTypeId());  // moment of inertia
-
-    // convert torque to molecular-frame
-    const auto torqueM = rotatePositionBackwards(q, torqueW);
-
-    // get I^-1 T in molecular-frame
-    const auto torqueDivMoIM = torqueM / I;
-
-    // convert to world-frame
-    const auto torqueDivMoIW = rotatePosition(q, torqueDivMoIM);
-
-    iter->addAngularVel(torqueDivMoIW * 0.5 * deltaT);  // (28)
+    if (updatePositionAndResetForces(*iter, particlePropertiesLibrary, deltaT, globalForce, maxAllowedDistanceMoved,
+                                     maxAllowedDistanceMovedSquared)) {
+      particleTooFast.store(true, std::memory_order_relaxed);
+    }
   }
 
+  if (particleTooFast.load(std::memory_order_relaxed) and fastParticlesThrow) {
+    throw std::runtime_error("At least one particle was too fast!");
+  }
+#endif
+}
+
+void calculateQuaternionsAndResetTorques(dap::DistributedAutoPas<ParticleType> &container,
+                                         const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                                         const double &deltaT, const std::array<double, 3> &globalForce) {
+#if MD_FLEXIBLE_MODE == MULTISITE
+  container.applyToOwnedParticles([&](auto &particle) {
+    updateQuaternionAndResetTorque(particle, particlePropertiesLibrary, deltaT, globalForce);
+  });
 #else
+  (void)container;
+  (void)particlePropertiesLibrary;
+  (void)deltaT;
+  (void)globalForce;
+  autopas::utils::ExceptionHandler::exception(
+      "Attempting to perform rotational integrations when md-flexible has not been compiled with multi-site support!");
+#endif
+}
+
+void calculateQuaternionsAndResetTorques(autopas::AutoPas<ParticleType> &autoPasContainer,
+                                         const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                                         const double &deltaT, const std::array<double, 3> &globalForce) {
+#if MD_FLEXIBLE_MODE == MULTISITE
+  AUTOPAS_OPENMP(parallel)
+  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+    updateQuaternionAndResetTorque(*iter, particlePropertiesLibrary, deltaT, globalForce);
+  }
+#else
+  (void)autoPasContainer;
+  (void)particlePropertiesLibrary;
+  (void)deltaT;
+  (void)globalForce;
+  autopas::utils::ExceptionHandler::exception(
+      "Attempting to perform rotational integrations when md-flexible has not been compiled with multi-site support!");
+#endif
+}
+
+void calculateVelocities(dap::DistributedAutoPas<ParticleType> &container,
+                         const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT) {
+  container.applyToOwnedParticles([&](auto &particle) { updateVelocity(particle, particlePropertiesLibrary, deltaT); });
+}
+
+void calculateVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
+                         const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT) {
+  AUTOPAS_OPENMP(parallel)
+  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+    updateVelocity(*iter, particlePropertiesLibrary, deltaT);
+  }
+}
+
+void calculateAngularVelocities(dap::DistributedAutoPas<ParticleType> &container,
+                                const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT) {
+#if MD_FLEXIBLE_MODE == MULTISITE
+  container.applyToOwnedParticles(
+      [&](auto &particle) { updateAngularVelocity(particle, particlePropertiesLibrary, deltaT); });
+#else
+  (void)container;
+  (void)particlePropertiesLibrary;
+  (void)deltaT;
+  autopas::utils::ExceptionHandler::exception(
+      "Attempting to perform rotational integrations when md-flexible has not been compiled with multi-site support!");
+#endif
+}
+
+void calculateAngularVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
+                                const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT) {
+#if MD_FLEXIBLE_MODE == MULTISITE
+  AUTOPAS_OPENMP(parallel)
+  for (auto iter = autoPasContainer.begin(autopas::IteratorBehavior::owned); iter.isValid(); ++iter) {
+    updateAngularVelocity(*iter, particlePropertiesLibrary, deltaT);
+  }
+#else
+  (void)autoPasContainer;
+  (void)particlePropertiesLibrary;
+  (void)deltaT;
   autopas::utils::ExceptionHandler::exception(
       "Attempting to perform rotational integrations when md-flexible has not been compiled with multi-site support!");
 #endif

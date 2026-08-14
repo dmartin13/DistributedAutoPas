@@ -61,22 +61,26 @@ if(NOT TARGET autopas)
     )
 endif()
 
-add_library(distributed_autopas INTERFACE)
+add_library(
+    distributed_autopas
+    src/DomainDecomposition.cpp
+    src/Runtime.cpp
+)
 
 target_include_directories(
     distributed_autopas
-    INTERFACE
+    PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 
 target_link_libraries(
     distributed_autopas
-    INTERFACE
+    PUBLIC
         autopas
         MPI::MPI_CXX
 )
 
-target_compile_features(distributed_autopas INTERFACE cxx_std_20)
+target_compile_features(distributed_autopas PUBLIC cxx_std_20)
 
 if(DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES)
     if(NOT DEFINED AUTOPAS_SOURCE_DIR OR NOT EXISTS "${AUTOPAS_SOURCE_DIR}/CMakeLists.txt")
@@ -96,6 +100,7 @@ if(CLANG_FORMAT_EXE)
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     )
 
     # Use a project-specific target name so this is safe when AutoPas and

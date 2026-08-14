@@ -8,6 +8,7 @@
 #include "TypeDefinitions.h"
 #include "autopas/AutoPasDecl.h"
 #include "autopas/utils/Quaternion.h"
+#include "distributed_autopas/DistributedAutoPas.h"
 #include "src/configuration/MDFlexConfig.h"
 
 /**
@@ -24,12 +25,21 @@ namespace TimeDiscretization {
  * In addition, pushes the force stored in the force vector to the old force vector and sets the force vector to the
  * global force in preparation for the calculate forces stage.
  *
- * @param autoPasContainer The container for which to update the positions.
+ * @param container The distributed particle container for which to update the positions.
  * @param particlePropertiesLibrary The particle properties library for the particles in the container.
  * @param deltaT The time step width.
  * @param globalForce Base force value to which every particle is reset.
  * @param fastParticlesThrow When true throws an exception if particles moved too far for verlet technique
  * (>skin/rebuildFrequency/2). Does nothing if dynamic containers are enabled.
+ */
+void calculatePositionsAndResetForces(dap::DistributedAutoPas<ParticleType> &container,
+                                      const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                                      const double &deltaT, const std::array<double, 3> &globalForce,
+                                      bool fastParticlesThrow);
+
+/**
+ * Legacy overload used by the original md-flexible unit tests.
+ * Production simulation code should use the DistributedAutoPas overload above.
  */
 void calculatePositionsAndResetForces(autopas::AutoPas<ParticleType> &autoPasContainer,
                                       const ParticlePropertiesLibraryType &particlePropertiesLibrary,
@@ -42,15 +52,13 @@ void calculatePositionsAndResetForces(autopas::AutoPas<ParticleType> &autoPasCon
  * (method A); with slight adaptations to account for md-flexible primarily using (angular) velocities rather than
  * (angular) momentums. Code lines are commented with references to corresponding equations within the paper.
  *
- * In addition, resets the torques to that determined by the global force only.
- *
  * @note Throws error if md-flexible is compiled without multi-site support.
- *
- * @param autoPasContainer
- * @param particlePropertiesLibrary
- * @param deltaT
- * @param globalForce
  */
+void calculateQuaternionsAndResetTorques(dap::DistributedAutoPas<ParticleType> &container,
+                                         const ParticlePropertiesLibraryType &particlePropertiesLibrary,
+                                         const double &deltaT, const std::array<double, 3> &globalForce);
+
+/** Legacy overload used by the original md-flexible unit tests. */
 void calculateQuaternionsAndResetTorques(autopas::AutoPas<ParticleType> &autoPasContainer,
                                          const ParticlePropertiesLibraryType &particlePropertiesLibrary,
                                          const double &deltaT, const std::array<double, 3> &globalForce);
@@ -60,11 +68,11 @@ void calculateQuaternionsAndResetTorques(autopas::AutoPas<ParticleType> &autoPas
  *
  * Specifically
  *      v_{n+1} = v_n + delta_t / (2 * mass) * (F_n + F_{n-1})
- *
- * @param autoPasContainer The container for which to update the velocities.
- * @param particlePropertiesLibrary The particle properties library for the particles in the container.
- * @param deltaT The time step width.
  */
+void calculateVelocities(dap::DistributedAutoPas<ParticleType> &container,
+                         const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT);
+
+/** Legacy overload used by the original md-flexible unit tests. */
 void calculateVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
                          const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT);
 
@@ -72,11 +80,11 @@ void calculateVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
  * Calculate and update the angular velocity for every particle.
  *
  * @note Throws error if md-flexible is compiled without multi-site support.
- *
- * @param autoPasContainer
- * @param particlePropertiesLibrary
- * @param deltaT
  */
+void calculateAngularVelocities(dap::DistributedAutoPas<ParticleType> &container,
+                                const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT);
+
+/** Legacy overload used by the original md-flexible unit tests. */
 void calculateAngularVelocities(autopas::AutoPas<ParticleType> &autoPasContainer,
                                 const ParticlePropertiesLibraryType &particlePropertiesLibrary, const double &deltaT);
 

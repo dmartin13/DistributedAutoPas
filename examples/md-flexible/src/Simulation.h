@@ -88,17 +88,15 @@ class Simulation {
   /**
    * Distributed particle container.
    *
-   * During the first integration step md-flexible still uses the local AutoPas instance for
-   * node-local helper routines (time integration, thermostat, VTK, ...). The distributed
-   * synchronization and interaction calculation are already routed through this container.
+   * md-flexible uses this container for time integration and interaction calculation. A local
+   * AutoPas escape hatch remains temporarily only for legacy thermostat and VTK helpers.
    */
   using DistributedContainerType = dap::DistributedAutoPas<ParticleType>;
   std::shared_ptr<DistributedContainerType> _distributedAutoPasContainer;
 
   /**
    * Temporary alias to the local AutoPas container owned by _distributedAutoPasContainer.
-   * This keeps the initial md-flexible integration small and will be removed as more of the
-   * required AutoPas API is forwarded by DistributedAutoPas.
+   * This is currently used only by legacy thermostat and VTK helpers and will be removed.
    */
   std::shared_ptr<autopas::AutoPas<ParticleType>> _autoPasContainer;
 

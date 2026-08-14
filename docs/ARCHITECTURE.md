@@ -56,7 +56,7 @@ NVSHMEM for GPU-resident particle data.
 - periodic migration / halo handling in x only
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
-- `localAutoPas()` is still used by legacy md-flexible helpers
+- `localAutoPas()` is still used by the legacy md-flexible thermostat and VTK helpers
 - MPI is the only communication backend
 
 ## Bundled example application
@@ -65,3 +65,9 @@ The adapted md-flexible simulator lives in `examples/md-flexible`. It is built
 as an application of DistributedAutoPas and may still depend on AutoPas for
 particle types and interaction functors. Distributed communication is intended
 to move behind the DistributedAutoPas API incrementally.
+
+## Compiled and templated components
+
+DistributedAutoPas is intentionally a mixed compiled/template library. Particle-dependent components remain in headers so arbitrary application particle types can instantiate them. Backend-independent, non-template implementation such as `DomainDecomposition` and non-template `Runtime` operations is compiled into the `distributed_autopas` library from `src/`.
+
+The current `Runtime` header still contains the templated reduction helper and the private MPI communicator type. Moving the concrete communication backend fully behind an internal interface is a later communication-layer refactoring and is deliberately separate from this step.

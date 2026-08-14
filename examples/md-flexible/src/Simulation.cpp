@@ -435,7 +435,7 @@ std::string Simulation::timerToString(const std::string &name, long timeNS, int 
 void Simulation::updatePositionsAndResetForces() {
   _timers.positionUpdate.start();
   TimeDiscretization::calculatePositionsAndResetForces(
-      *_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()), _configuration.deltaT.value,
+      *_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()), _configuration.deltaT.value,
       _configuration.globalForce.value, _configuration.fastParticlesThrow.value);
   _timers.positionUpdate.stop();
 }
@@ -443,7 +443,7 @@ void Simulation::updatePositionsAndResetForces() {
 void Simulation::updateQuaternions() {
   _timers.quaternionUpdate.start();
   TimeDiscretization::calculateQuaternionsAndResetTorques(
-      *_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()), _configuration.deltaT.value,
+      *_distributedAutoPasContainer, *(_configuration.getParticlePropertiesLibrary()), _configuration.deltaT.value,
       _configuration.globalForce.value);
   _timers.quaternionUpdate.stop();
 }
@@ -489,8 +489,8 @@ void Simulation::updateVelocities() {
 
   if (deltaT != 0) {
     _timers.velocityUpdate.start();
-    TimeDiscretization::calculateVelocities(*_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
-                                            deltaT);
+    TimeDiscretization::calculateVelocities(*_distributedAutoPasContainer,
+                                            *(_configuration.getParticlePropertiesLibrary()), deltaT);
     _timers.velocityUpdate.stop();
   }
 }
@@ -499,8 +499,8 @@ void Simulation::updateAngularVelocities() {
   const double deltaT = _configuration.deltaT.value;
 
   _timers.angularVelocityUpdate.start();
-  TimeDiscretization::calculateAngularVelocities(*_autoPasContainer, *(_configuration.getParticlePropertiesLibrary()),
-                                                 deltaT);
+  TimeDiscretization::calculateAngularVelocities(*_distributedAutoPasContainer,
+                                                 *(_configuration.getParticlePropertiesLibrary()), deltaT);
   _timers.angularVelocityUpdate.stop();
 }
 

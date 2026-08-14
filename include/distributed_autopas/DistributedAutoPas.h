@@ -41,7 +41,7 @@ class DistributedAutoPas {
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, Configurator &&configurator)
       : _runtime(runtime),
-        _domain(runtime.communicator(), globalMin, globalMax),
+        _domain(runtime.rank(), runtime.size(), globalMin, globalMax),
         _particleMigration(runtime.communicator()),
         _haloExchange(runtime.communicator()),
         _cutoff(cutoff) {
@@ -141,6 +141,8 @@ class DistributedAutoPas {
   // These methods deliberately expose values, not the local container itself.
   [[nodiscard]] bool localSearchSpaceIsTrivial() const { return _autoPas.searchSpaceIsTrivial(); }
   [[nodiscard]] double getMeanLocalRebuildFrequency() { return _autoPas.getMeanRebuildFrequency(); }
+  [[nodiscard]] auto getVerletSkin() { return _autoPas.getVerletSkin(); }
+  [[nodiscard]] auto getVerletRebuildFrequency() { return _autoPas.getVerletRebuildFrequency(); }
 
   void finalize() { _autoPas.finalize(); }
 
