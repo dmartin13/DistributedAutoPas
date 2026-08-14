@@ -19,9 +19,9 @@
 #include "src/ParallelVtkWriter.h"
 #include "src/TypeDefinitions.h"
 #include "src/configuration/MDFlexConfig.h"
+#include "src/distributed/MoleculeLJParticleSerializer.h"
 #include "src/domainDecomposition/DomainDecomposition.h"
 #include "src/domainDecomposition/RegularGridDecomposition.h"
-#include "src/distributed/MoleculeLJParticleSerializer.h"
 
 /**
  * Handles minimal initialization requirements for MD-Flexible simulations.

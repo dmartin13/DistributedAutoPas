@@ -67,8 +67,8 @@ int main(int argc, char **argv) {
       particles.forEachOwnedParticle([](const auto &particle) {
         const auto &r = particle.getR();
         const auto &f = particle.getF();
-        std::cout << "  particle " << particle.getID() << " r=(" << r[0] << ", " << r[1] << ", " << r[2]
-                  << ") f=(" << f[0] << ", " << f[1] << ", " << f[2] << ")\n";
+        std::cout << "  particle " << particle.getID() << " r=(" << r[0] << ", " << r[1] << ", " << r[2] << ") f=("
+                  << f[0] << ", " << f[1] << ", " << f[2] << ")\n";
       });
     }
     particles.barrier();

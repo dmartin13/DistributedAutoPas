@@ -27,8 +27,8 @@ struct ParticleSerializer<mdLib::MoleculeLJ> {
   };
 
   static Message pack(const mdLib::MoleculeLJ &particle) {
-    return Message{particle.getR(), particle.getV(), particle.getF(), particle.getOldF(), particle.getID(),
-                   particle.getTypeId()};
+    return Message{particle.getR(),    particle.getV(),  particle.getF(),
+                   particle.getOldF(), particle.getID(), particle.getTypeId()};
   }
 
   static mdLib::MoleculeLJ unpack(const Message &message) {

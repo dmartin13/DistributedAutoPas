@@ -17,14 +17,13 @@ int main(int argc, char **argv) {
   const std::array<double, 3> globalMax{10.0, 10.0, 10.0};
   constexpr double cutoff = 0.5;
 
-  dap::DistributedAutoPas<dap::Particle> particles(
-      runtime, globalMin, globalMax, cutoff, [](auto &autoPas) {
-        autoPas.setAllowedContainers({autopas::ContainerOption::directSum});
-        autoPas.setAllowedTraversals({autopas::TraversalOption::ds_sequential});
-        autoPas.setAllowedDataLayouts({autopas::DataLayoutOption::aos});
-        autoPas.setAllowedNewton3Options({autopas::Newton3Option::enabled});
-        autoPas.setVerletSkin(0.0);
-      });
+  dap::DistributedAutoPas<dap::Particle> particles(runtime, globalMin, globalMax, cutoff, [](auto &autoPas) {
+    autoPas.setAllowedContainers({autopas::ContainerOption::directSum});
+    autoPas.setAllowedTraversals({autopas::TraversalOption::ds_sequential});
+    autoPas.setAllowedDataLayouts({autopas::DataLayoutOption::aos});
+    autoPas.setAllowedNewton3Options({autopas::Newton3Option::enabled});
+    autoPas.setVerletSkin(0.0);
+  });
 
   for (int i = 0; i < 10; ++i) {
     dap::Particle particle;

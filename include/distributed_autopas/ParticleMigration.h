@@ -17,7 +17,7 @@ class ParticleMigration {
   explicit ParticleMigration(MPI_Comm comm) : _comm(comm) {}
 
   [[nodiscard]] std::vector<Particle> migrate(const std::vector<Particle> &emigrants,
-                                               const DomainDecomposition &domain) const {
+                                              const DomainDecomposition &domain) const {
     std::vector<Particle> sendLeft;
     std::vector<Particle> sendRight;
     std::vector<Particle> immigrants;
@@ -43,9 +43,8 @@ class ParticleMigration {
       }
     }
 
-    auto exchange =
-        exchangeLeftRight<Particle, Serializer>(_comm, domain.leftNeighbor(), domain.rightNeighbor(), sendLeft,
-                                                sendRight, 100);
+    auto exchange = exchangeLeftRight<Particle, Serializer>(_comm, domain.leftNeighbor(), domain.rightNeighbor(),
+                                                            sendLeft, sendRight, 100);
 
     immigrants.reserve(immigrants.size() + exchange.recvFromLeft.size() + exchange.recvFromRight.size());
     immigrants.insert(immigrants.end(), exchange.recvFromLeft.begin(), exchange.recvFromLeft.end());

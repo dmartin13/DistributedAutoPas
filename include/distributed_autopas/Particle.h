@@ -26,9 +26,7 @@ struct ParticleSerializer<Particle> {
     unsigned long id{0};
   };
 
-  static Message pack(const Particle &particle) {
-    return Message{particle.getR(), particle.getF(), particle.getID()};
-  }
+  static Message pack(const Particle &particle) { return Message{particle.getR(), particle.getF(), particle.getID()}; }
 
   static Particle unpack(const Message &message) {
     Particle particle;

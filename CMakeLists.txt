@@ -87,7 +87,7 @@ if(DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-find_program(CLANG_FORMAT_EXE clang-format-14)
+find_program(CLANG_FORMAT_EXE NAMES clang-format-14 clang-format)
 
 if(CLANG_FORMAT_EXE)
     file(

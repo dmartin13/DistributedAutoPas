@@ -22,8 +22,7 @@ struct LeftRightExchange {
  * independent of the concrete particle representation used by an application.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
-LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right,
-                                              const std::vector<Particle> &sendLeft,
+LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right, const std::vector<Particle> &sendLeft,
                                               const std::vector<Particle> &sendRight, int tag) {
   using Message = typename Serializer::Message;
   static_assert(std::is_trivially_copyable_v<Message>,

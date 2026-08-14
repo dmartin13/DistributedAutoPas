@@ -16,7 +16,7 @@ class HaloExchange {
   explicit HaloExchange(MPI_Comm comm) : _comm(comm) {}
 
   [[nodiscard]] std::vector<Particle> exchange(const std::vector<Particle> &ownedParticles,
-                                                const DomainDecomposition &domain, double haloWidth) const {
+                                               const DomainDecomposition &domain, double haloWidth) const {
     std::vector<Particle> sendLeft;
     std::vector<Particle> sendRight;
 
@@ -30,9 +30,8 @@ class HaloExchange {
       }
     }
 
-    auto exchange =
-        exchangeLeftRight<Particle, Serializer>(_comm, domain.leftNeighbor(), domain.rightNeighbor(), sendLeft,
-                                                sendRight, 300);
+    auto exchange = exchangeLeftRight<Particle, Serializer>(_comm, domain.leftNeighbor(), domain.rightNeighbor(),
+                                                            sendLeft, sendRight, 300);
 
     const double lengthX = domain.globalMax()[0] - domain.globalMin()[0];
 
