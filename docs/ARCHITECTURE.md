@@ -44,7 +44,7 @@ local tuning metadata through dedicated DistributedAutoPas operations.
 
 ## Initial particle distribution
 
-Initialization and checkpoint loading use `addDistributedParticles()`. Every process contributes the particles currently available to it, and DistributedAutoPas routes each particle directly to the rank that owns its position according to the current decomposition. The simulator does not inspect rank ownership and does not use a particle communicator.
+Particle insertion distinguishes between replicated and already distributed input. Replicated configuration input uses `addParticlesFromRoot()`, so only one logical copy is routed to owners. Checkpoint pieces that are already distributed across processes use `addDistributedParticles()`, where every process contributes its local input collection. In both cases, DistributedAutoPas determines rank ownership and the simulator does not use a particle communicator.
 
 The current MPI implementation uses an all-to-all exchange because initialization may move a particle directly to any rank. This is intentionally separate from timestep migration, which currently assumes movement only to direct neighbors.
 
@@ -83,8 +83,9 @@ as an application of DistributedAutoPas and may still depend on AutoPas for
 particle types and interaction functors. The active simulation path no longer
 constructs or stores md-flexible's legacy `RegularGridDecomposition`; VTK domain
 output obtains local/global bounds and the domain rank from DistributedAutoPas.
-The legacy decomposition sources remain temporarily in the bundled md-flexible
-tree for their existing standalone code/tests and can be removed in a later cleanup.
+The old application-owned decomposition implementation and its dedicated tests have
+been removed from the bundled md-flexible tree. DistributedAutoPas is now the only
+active distributed ownership/decomposition layer in this example.
 
 Particle insertion distinguishes between two input ownership models. Replicated
 configuration input is inserted with `addParticlesFromRoot()`, so only one logical
@@ -96,3 +97,13 @@ where every rank contributes its local input collection.
 DistributedAutoPas is intentionally a mixed compiled/template library. Particle-dependent components remain in headers so arbitrary application particle types can instantiate them. Backend-independent, non-template implementation such as `DomainDecomposition` and non-template `Runtime` operations is compiled into the `distributed_autopas` library from `src/`.
 
 The current `Runtime` header still contains the templated reduction helper and the private MPI communicator type. Moving the concrete communication backend fully behind an internal interface is a later communication-layer refactoring and is deliberately separate from this step.
+
+
+## Removed legacy md-flexible distributed layer
+
+The bundled example no longer contains md-flexible's old `RegularGridDecomposition`,
+`DomainTools`, `DomainDecomposition`, or `ParticleCommunicator` implementation. Their
+dedicated domain-decomposition tests were removed together with them. Configuration
+support such as `LoadBalancerOption` is kept for now because it is still referenced by
+md-flexible's YAML/CLI configuration code, even though this prototype forces load
+balancing to `None`.
