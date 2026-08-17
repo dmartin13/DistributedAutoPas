@@ -16,7 +16,6 @@
 #include "distributed_autopas/Runtime.h"
 #include "src/TypeDefinitions.h"
 #include "src/distributed/MoleculeLJParticleSerializer.h"
-#include "src/domainDecomposition/RegularGridDecomposition.h"
 
 /**
  * The ParallelVtkWriter creates VTK files for a distributed simulation.
@@ -43,10 +42,8 @@ class ParallelVtkWriter {
    * Writes the current state of particles and the current domain subdivision into vtk files.
    * @param currentIteration The simulation's current iteration.
    * @param particleContainer The distributed particle container whose owned particles will be logged.
-   * @param decomposition: The decomposition of the global domain.
    */
-  void recordTimestep(size_t currentIteration, const DistributedContainerType &particleContainer,
-                      const RegularGridDecomposition &decomposition) const;
+  void recordTimestep(size_t currentIteration, const DistributedContainerType &particleContainer) const;
 
  private:
   /**
@@ -108,13 +105,13 @@ class ParallelVtkWriter {
    * Writes the current domain subdivision into vtk files.
    * @param currentIteration: The simulations current iteration.
    * @param autoPasConfigurations: All current configuration of an autopas container (pairwise, triwise).
-   * @param decomposition: The simulations domain decomposition.
+   * @param particleContainer Distributed container providing the local and global domain bounds.
    */
   void recordDomainSubdivision(
       size_t currentIteration,
       const std::unordered_map<autopas::InteractionTypeOption::Value,
                                std::reference_wrapper<const autopas::Configuration>> &autoPasConfigurations,
-      const RegularGridDecomposition &decomposition) const;
+      const DistributedContainerType &particleContainer) const;
 
   /**
    * Tries to create a folder for the current writer session and stores it in _sessionFolderPath.
@@ -136,10 +133,10 @@ class ParallelVtkWriter {
    * @note For visualization in ParaView the .pvtu files need to be loaded.
    *
    * @param currentIteration: The simulation's current iteration.
-   * @param decomposition: The decomposition of the domain.
+   * @param particleContainer Distributed container providing the global domain bounds.
    * @param interactionTypes: Interaction types that are considered in the current simulation.
    */
-  void createRanksPvtuFile(size_t currentIteration, const RegularGridDecomposition &decomposition,
+  void createRanksPvtuFile(size_t currentIteration, const DistributedContainerType &particleContainer,
                            const std::unordered_set<autopas::InteractionTypeOption::Value> &interactionTypes) const;
 
   /**

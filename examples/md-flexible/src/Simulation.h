@@ -20,8 +20,6 @@
 #include "src/TypeDefinitions.h"
 #include "src/configuration/MDFlexConfig.h"
 #include "src/distributed/MoleculeLJParticleSerializer.h"
-#include "src/domainDecomposition/DomainDecomposition.h"
-#include "src/domainDecomposition/RegularGridDecomposition.h"
 
 /**
  * Handles minimal initialization requirements for MD-Flexible simulations.
@@ -32,10 +30,9 @@ class Simulation {
   /**
    * Initializes the simulation on a domain according to the arguments passed to the main function.
    * @param configuration: The configuration of this simulation.
-   * @param domainDecomposition: The domain decomposition used for this simulation
+   * @param runtime DistributedAutoPas runtime used by the distributed particle container.
    */
-  Simulation(const MDFlexConfig &configuration, std::shared_ptr<RegularGridDecomposition> &domainDecomposition,
-             dap::Runtime &runtime);
+  Simulation(const MDFlexConfig &configuration, dap::Runtime &runtime);
 
   /**
    * Destructor.
@@ -342,10 +339,6 @@ class Simulation {
    */
   void updateThermostat();
 
-  /**
-   * Legacy md-flexible domain decomposition, currently retained for domain-subdivision VTK output.
-   */
-  std::shared_ptr<RegularGridDecomposition> _domainDecomposition;
   /**
    * If MPI is enabled, accumulates the times of all ranks on rank 0.
    * Otherwise, this function does nothing.

@@ -81,11 +81,8 @@ size_t getTerminalWidth() {
 }
 }  // namespace
 
-Simulation::Simulation(const MDFlexConfig &configuration,
-                       std::shared_ptr<RegularGridDecomposition> &domainDecomposition, dap::Runtime &runtime)
-    : _configuration(configuration),
-      _domainDecomposition(domainDecomposition),
-      _totalEnergySensor(configuration.energySensorOption.value) {
+Simulation::Simulation(const MDFlexConfig &configuration, dap::Runtime &runtime)
+    : _configuration(configuration), _totalEnergySensor(configuration.energySensorOption.value) {
   _timers.total.start();
   _timers.initialization.start();
   _totalEnergySensor.startMeasurement();
@@ -189,21 +186,6 @@ Simulation::Simulation(const MDFlexConfig &configuration,
         autoPas.setOutputSuffix(outputSuffix);
       });
 
-  // The legacy RegularGridDecomposition is still used by VTK domain-subdivision output in this
-  // transitional step. Make sure it describes the same static 1D decomposition as
-  // DistributedAutoPas instead of silently running with two different ownership maps.
-  const auto &dapLocalMin = _distributedAutoPasContainer->localBoxMin();
-  const auto &dapLocalMax = _distributedAutoPasContainer->localBoxMax();
-  const auto &legacyLocalMin = _domainDecomposition->getLocalBoxMin();
-  const auto &legacyLocalMax = _domainDecomposition->getLocalBoxMax();
-  for (std::size_t d = 0; d < 3; ++d) {
-    if (std::abs(dapLocalMin[d] - legacyLocalMin[d]) > 1e-12 or std::abs(dapLocalMax[d] - legacyLocalMax[d]) > 1e-12) {
-      throw std::runtime_error(
-          "DistributedAutoPas and md-flexible use different local domains. "
-          "The current integration step requires a static 1D decomposition along x.");
-    }
-  }
-
   autopas::Logger::get()->set_level(_configuration.logLevel.value);
 
   // Throw an error if there is not more than one configuration to test in the search space but more than one tuning
@@ -245,7 +227,7 @@ void Simulation::run() {
   while (needsMoreIterations()) {
     if (_vtkWriter.has_value() and _iteration % _configuration.vtkWriteFrequency.value == 0) {
       _timers.vtk.start();
-      _vtkWriter->recordTimestep(_iteration, *_distributedAutoPasContainer, *_domainDecomposition);
+      _vtkWriter->recordTimestep(_iteration, *_distributedAutoPasContainer);
       _timers.vtk.stop();
     }
 
@@ -305,7 +287,7 @@ void Simulation::run() {
 
   // Record last state of simulation.
   if (_vtkWriter.has_value()) {
-    _vtkWriter->recordTimestep(_iteration, *_distributedAutoPasContainer, *_domainDecomposition);
+    _vtkWriter->recordTimestep(_iteration, *_distributedAutoPasContainer);
   }
 }
 
@@ -688,10 +670,20 @@ void Simulation::checkNumParticles(size_t expectedNumParticlesGlobal, size_t num
 }
 
 void Simulation::loadParticles() {
-  // Each rank contributes the particles currently stored in its configuration.
-  // DistributedAutoPas routes every particle directly to the rank that owns its position.
   const auto numParticlesInConfigLocally = _configuration.particles.size();
-  _distributedAutoPasContainer->addDistributedParticles(_configuration.particles);
+
+  // Object generators describe replicated configuration input. Only rank 0 is a logical
+  // source for these particles. Checkpoint loading is different: when checkpoint pieces
+  // match the current rank count, every rank contributes its own piece.
+  size_t numParticlesInConfigGlobal{};
+  if (_configuration.checkpointfile.value.empty()) {
+    _distributedAutoPasContainer->addParticlesFromRoot(_configuration.particles);
+    numParticlesInConfigGlobal = _distributedAutoPasContainer->globalSum(
+        _distributedAutoPasContainer->isRoot() ? numParticlesInConfigLocally : size_t{0});
+  } else {
+    _distributedAutoPasContainer->addDistributedParticles(_configuration.particles);
+    numParticlesInConfigGlobal = _distributedAutoPasContainer->globalSum(numParticlesInConfigLocally);
+  }
   _configuration.flushParticles();
 
   // Output and sanity checks
@@ -704,7 +696,6 @@ void Simulation::loadParticles() {
             << numParticlesLocally << "\n";
 
   const auto numParticlesAddedGlobal = _distributedAutoPasContainer->globalSum(numParticlesLocally);
-  const auto numParticlesInConfigGlobal = _distributedAutoPasContainer->globalSum(numParticlesInConfigLocally);
 
   if (_distributedAutoPasContainer->isRoot()) {
     std::cout << "Number of particles at initialization globally" << std::setw(std::to_string(numberOfRanks).length())

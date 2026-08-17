@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -69,6 +70,28 @@ class DistributedAutoPas {
    * Particles outside the global simulation box are ignored. The application can detect such
    * input through its global particle-count sanity check.
    */
+  /**
+   * Add a particle collection that conceptually originates on one root rank.
+   *
+   * All ranks must call this collective operation with the same root rank. Only the
+   * collection passed on rootRank is considered. Collections present on the other
+   * ranks are ignored. This is useful for replicated application input such as
+   * deterministic particles generated from a shared configuration file.
+   */
+  template <class Collection>
+  void addParticlesFromRoot(const Collection &particles, int rootRank = 0) {
+    if (rootRank < 0 or rootRank >= _domain.numRanks()) {
+      throw std::runtime_error("DistributedAutoPas: invalid root rank for particle insertion.");
+    }
+
+    if (_runtime.rank() == rootRank) {
+      addDistributedParticles(particles);
+    } else {
+      const std::vector<Particle> noParticles;
+      addDistributedParticles(noParticles);
+    }
+  }
+
   template <class Collection>
   void addDistributedParticles(const Collection &particles) {
     std::vector<std::vector<Particle>> particlesByDestination(static_cast<std::size_t>(_domain.numRanks()));

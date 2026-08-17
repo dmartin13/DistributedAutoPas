@@ -26,11 +26,11 @@ ParallelVtkWriter::ParallelVtkWriter(std::string sessionName, const std::string 
   runtime.broadcastString(_dataFolderPath);
 }
 
-void ParallelVtkWriter::recordTimestep(size_t currentIteration, const DistributedContainerType &particleContainer,
-                                       const RegularGridDecomposition &decomposition) const {
+void ParallelVtkWriter::recordTimestep(size_t currentIteration,
+                                       const DistributedContainerType &particleContainer) const {
   recordParticleStates(currentIteration, particleContainer);
   const auto currentConfig = particleContainer.getCurrentLocalConfigurations();
-  recordDomainSubdivision(currentIteration, currentConfig, decomposition);
+  recordDomainSubdivision(currentIteration, currentConfig, particleContainer);
 }
 
 /**
@@ -189,14 +189,14 @@ void ParallelVtkWriter::recordDomainSubdivision(
     size_t currentIteration,
     const std::unordered_map<autopas::InteractionTypeOption::Value,
                              std::reference_wrapper<const autopas::Configuration>> &autoPasConfigurations,
-    const RegularGridDecomposition &decomposition) const {
+    const DistributedContainerType &particleContainer) const {
   // Extract active interaction types to print them to the .pvtu file.
   std::unordered_set<autopas::InteractionTypeOption::Value> interactionTypes;
   interactionTypes.reserve(autoPasConfigurations.size());
   std::transform(autoPasConfigurations.begin(), autoPasConfigurations.end(),
                  std::inserter(interactionTypes, interactionTypes.end()), [&](const auto &pair) { return pair.first; });
   if (_rank == 0) {
-    createRanksPvtuFile(currentIteration, decomposition, interactionTypes);
+    createRanksPvtuFile(currentIteration, particleContainer, interactionTypes);
   }
 
   std::ostringstream timestepFileName;
@@ -209,8 +209,8 @@ void ParallelVtkWriter::recordDomainSubdivision(
     throw std::runtime_error("Simulation::writeVTKFile(): Failed to open file \"" + timestepFileName.str() + "\"");
   }
 
-  const std::array<double, 3> localBoxMin = decomposition.getLocalBoxMin();
-  const std::array<double, 3> localBoxMax = decomposition.getLocalBoxMax();
+  const auto &localBoxMin = particleContainer.localBoxMin();
+  const auto &localBoxMax = particleContainer.localBoxMax();
 
   auto printDataArray = [&](const auto &data, const std::string &type, const std::string &name) {
     timestepFile << "        <DataArray type=\"" << type << "\" Name=\"" << name << "\" format=\"ascii\">\n";
@@ -223,7 +223,7 @@ void ParallelVtkWriter::recordDomainSubdivision(
   timestepFile << "  <UnstructuredGrid>\n";
   timestepFile << "    <Piece NumberOfPoints=\"8\" NumberOfCells=\"1\">\n";
   timestepFile << "      <CellData>\n";
-  printDataArray(decomposition.getDomainIndex(), "Int32", "DomainId");
+  printDataArray(particleContainer.rank(), "Int32", "DomainId");
 
   // General Configuration information
   printDataArray(autoPasConfigurations.begin()->second.get().cellSizeFactor, "Float32", "CellSizeFactor");
@@ -339,7 +339,7 @@ void ParallelVtkWriter::createParticlesPvtuFile(size_t currentIteration) const {
 }
 
 void ParallelVtkWriter::createRanksPvtuFile(
-    size_t currentIteration, const RegularGridDecomposition &decomposition,
+    size_t currentIteration, const DistributedContainerType &particleContainer,
     const std::unordered_set<autopas::InteractionTypeOption::Value> &interactionTypes) const {
   std::ostringstream filename;
   filename << _sessionFolderPath << _sessionName << "_Ranks_" << std::setfill('0')
@@ -351,8 +351,8 @@ void ParallelVtkWriter::createRanksPvtuFile(
   if (not timestepFile.is_open()) {
     throw std::runtime_error("Simulation::writeVTKFile(): Failed to open file \"" + filename.str() + "\"");
   }
-  const auto &globalBoxMin = decomposition.getGlobalBoxMin();
-  const auto &globalBoxMax = decomposition.getGlobalBoxMax();
+  const auto &globalBoxMin = particleContainer.globalBoxMin();
+  const auto &globalBoxMax = particleContainer.globalBoxMax();
   timestepFile << "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n";
   timestepFile << "<VTKFile byte_order=\"LittleEndian\" type=\"PUnstructuredGrid\" version=\"0.1\">\n";
   timestepFile << "  <PUnstructuredGrid GhostLevel=\"0\">\n";

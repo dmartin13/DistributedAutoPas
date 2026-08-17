@@ -25,12 +25,10 @@ int main(int argc, char **argv) {
 
     // Transitional restriction while md-flexible is moved to DistributedAutoPas:
     // the current DistributedAutoPas MVP decomposes only along x and has no
-    // distributed load balancing yet. Keep the legacy decomposition in the same
-    // shape because it is still used by legacy output code.
+    // distributed load balancing yet. Keep the printed md-flexible configuration
+    // consistent with the decomposition that is actually used.
     configuration.subdivideDimension.value = {true, false, false};
     configuration.loadBalancer.value = LoadBalancerOption::none;
-
-    auto domainDecomposition = std::make_shared<RegularGridDecomposition>(configuration);
 
     if (not configuration.checkpointfile.value.empty()) {
       configuration.flushParticles();
@@ -44,7 +42,7 @@ int main(int argc, char **argv) {
       std::cout << "DistributedAutoPas is running with " << runtime.size() << " ranks." << std::endl;
     }
 
-    Simulation simulation(configuration, domainDecomposition, runtime);
+    Simulation simulation(configuration, runtime);
     simulation.run();
     simulation.finalize();
 

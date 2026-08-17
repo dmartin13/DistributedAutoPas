@@ -80,8 +80,16 @@ physical quantity that should be accumulated or written.
 
 The adapted md-flexible simulator lives in `examples/md-flexible`. It is built
 as an application of DistributedAutoPas and may still depend on AutoPas for
-particle types and interaction functors. Distributed communication is intended
-to move behind the DistributedAutoPas API incrementally.
+particle types and interaction functors. The active simulation path no longer
+constructs or stores md-flexible's legacy `RegularGridDecomposition`; VTK domain
+output obtains local/global bounds and the domain rank from DistributedAutoPas.
+The legacy decomposition sources remain temporarily in the bundled md-flexible
+tree for their existing standalone code/tests and can be removed in a later cleanup.
+
+Particle insertion distinguishes between two input ownership models. Replicated
+configuration input is inserted with `addParticlesFromRoot()`, so only one logical
+copy is routed to owners. Distributed checkpoint pieces use `addDistributedParticles()`,
+where every rank contributes its local input collection.
 
 ## Compiled and templated components
 
