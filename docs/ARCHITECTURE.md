@@ -87,8 +87,11 @@ The old application-owned decomposition implementation and its dedicated tests h
 been removed from the bundled md-flexible tree. DistributedAutoPas is now the only
 active distributed ownership/decomposition layer in this example.
 
-Particle insertion distinguishes between two input ownership models. Replicated
-configuration input is inserted with `addParticlesFromRoot()`, so only one logical
+Particle insertion distinguishes between two input ownership models. For replicated
+configuration input, `dap::Runtime` tells the application which process expands the
+configured objects into particles. Object generation in `MDFlexConfig` therefore does
+not query MPI or the current rank. Those particles are then inserted with
+`addParticlesFromRoot()`, so only one logical
 copy is routed to owners. Distributed checkpoint pieces use `addDistributedParticles()`,
 where every rank contributes its local input collection.
 

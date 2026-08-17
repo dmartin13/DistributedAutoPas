@@ -15,7 +15,6 @@
 
 #include "MDFlexParser.h"
 #include "autopas/utils/ArrayUtils.h"
-#include "autopas/utils/WrapMPI.h"
 #include "autopas/utils/isSmartPointer.h"
 #include "src/ParticleSerializationTools.h"
 #include "src/Thermostat.h"
@@ -185,7 +184,7 @@ void loadParticlesFromRankRecord(std::string_view filename, const size_t &rank, 
 }
 }  // namespace
 
-MDFlexConfig::MDFlexConfig(int argc, char **argv) {
+MDFlexConfig::MDFlexConfig(int argc, char **argv, bool generateParticlesFromObjects) {
   auto parserExitCode = MDFlexParser::parseInput(argc, argv, *this);
   if (parserExitCode != MDFlexParser::exitCodes::success) {
     if (parserExitCode == MDFlexParser::exitCodes::parsingError) {
@@ -203,7 +202,9 @@ MDFlexConfig::MDFlexConfig(int argc, char **argv) {
 
   initializeParticlePropertiesLibrary();
 
-  initializeObjects();
+  if (generateParticlesFromObjects) {
+    initializeObjects();
+  }
 }
 
 std::string MDFlexConfig::to_string() const {
@@ -623,26 +624,20 @@ void MDFlexConfig::initializeParticlePropertiesLibrary() {
 }
 
 void MDFlexConfig::initializeObjects() {
-  // @todo: the object generators should only generate particles relevant for the current rank's domain
-  // All objects are generated on rank one. Particles are then distributed upon insertion.
-  int myRank{};
-  autopas::AutoPas_MPI_Comm_rank(AUTOPAS_MPI_COMM_WORLD, &myRank);
-  if (myRank == 0) {
-    for (const auto &object : cubeGridObjects) {
-      object.generate(particles);
-    }
-    for (const auto &object : cubeGaussObjects) {
-      object.generate(particles);
-    }
-    for (const auto &object : cubeUniformObjects) {
-      object.generate(particles);
-    }
-    for (const auto &object : sphereObjects) {
-      object.generate(particles);
-    }
-    for (const auto &object : cubeClosestPackedObjects) {
-      object.generate(particles);
-    }
+  for (const auto &object : cubeGridObjects) {
+    object.generate(particles);
+  }
+  for (const auto &object : cubeGaussObjects) {
+    object.generate(particles);
+  }
+  for (const auto &object : cubeUniformObjects) {
+    object.generate(particles);
+  }
+  for (const auto &object : sphereObjects) {
+    object.generate(particles);
+  }
+  for (const auto &object : cubeClosestPackedObjects) {
+    object.generate(particles);
   }
 }
 

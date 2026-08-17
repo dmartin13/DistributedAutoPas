@@ -21,7 +21,7 @@ extern template class autopas::AutoPas<ParticleType>;
 int main(int argc, char **argv) {
   dap::Runtime runtime(argc, argv);
   {
-    MDFlexConfig configuration(argc, argv);
+    MDFlexConfig configuration(argc, argv, runtime.isRoot());
 
     // Transitional restriction while md-flexible is moved to DistributedAutoPas:
     // the current DistributedAutoPas MVP decomposes only along x and has no

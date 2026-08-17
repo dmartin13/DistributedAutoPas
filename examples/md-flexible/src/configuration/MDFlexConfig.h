@@ -44,8 +44,9 @@ class MDFlexConfig {
    * Constructor that initializes the configuration from the CLI arguments (incl. yaml file argument).
    * @param argc: the argument count of the arguments passed to the main function.
    * @param argv: the argument vector passed to the main function.
+   * @param generateParticlesFromObjects Whether configured objects should be expanded into particles on this process.
    */
-  MDFlexConfig(int argc, char **argv);
+  MDFlexConfig(int argc, char **argv, bool generateParticlesFromObjects = true);
 
   /**
    * Constructor using only default values.
