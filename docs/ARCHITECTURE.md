@@ -70,8 +70,9 @@ physical quantity that should be accumulated or written.
 
 ## Current limitations
 
-- static 1D decomposition in x
-- periodic migration / halo handling in x only
+- `DistributedAutoPas` can construct static Cartesian process grids from a subdivision mask and uses them for local AutoPas boxes and initial particle ownership
+- timestep migration and halo exchange are still implemented for x-only process grids and reject other layouts before communication starts
+- the bundled md-flexible example therefore still forces `subdivide-dimension: [true, false, false]` until 3D synchronization is implemented
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
 - MPI is the only communication backend

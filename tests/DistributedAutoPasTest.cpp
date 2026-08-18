@@ -153,6 +153,48 @@ TEST(DistributedAutoPasTest, RedistributesContributionsFromAllRanksToTheirOwners
   particles.finalize();
 }
 
+TEST(DistributedAutoPasTest, UsesThreeDimensionalProcessGridForInitialOwnership) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 8);
+
+  constexpr std::array<double, 3> boxMin{0., 0., 0.};
+  constexpr std::array<double, 3> boxMax{4., 4., 4.};
+  constexpr std::array<bool, 3> subdivideDimensions{true, true, true};
+
+  dap::DistributedAutoPas<Particle> particles(runtime, boxMin, boxMax, cutoff, subdivideDimensions, makeConfigurator());
+
+  std::vector<Particle> replicatedInput;
+  for (int x = 0; x < 2; ++x) {
+    for (int y = 0; y < 2; ++y) {
+      for (int z = 0; z < 2; ++z) {
+        const auto owner = static_cast<unsigned long>(x * 4 + y * 2 + z);
+        Particle particle;
+        particle.setID(owner);
+        particle.setR({1. + 2. * x, 1. + 2. * y, 1. + 2. * z});
+        replicatedInput.push_back(particle);
+      }
+    }
+  }
+
+  particles.addParticlesFromRoot(replicatedInput);
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 8);
+  EXPECT_EQ(particles.getLocalNumberOfOwnedParticles(), 1);
+  EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{static_cast<unsigned long>(runtime.rank())}));
+
+  const int rank = runtime.rank();
+  const int x = rank / 4;
+  const int y = (rank % 4) / 2;
+  const int z = rank % 2;
+
+  EXPECT_EQ(particles.localBoxMin(), (std::array<double, 3>{2. * x, 2. * y, 2. * z}));
+  EXPECT_EQ(particles.localBoxMax(), (std::array<double, 3>{2. * (x + 1), 2. * (y + 1), 2. * (z + 1)}));
+
+  particles.finalize();
+}
+
 TEST(DistributedAutoPasTest, ReducesDoubleValuesGlobally) {
   int argc = 0;
   char **argv = nullptr;

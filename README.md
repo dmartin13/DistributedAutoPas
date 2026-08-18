@@ -54,7 +54,7 @@ build/examples/md-flexible/distributed-lj-example
 ## Tests
 
 DistributedAutoPas tests use GoogleTest and are enabled by default for a standalone checkout.
-The communication, particle-migration, halo-exchange, and public DistributedAutoPas API tests are MPI GoogleTests. CTest launches the distributed tests with the required rank count, including one- and four-rank public-API force checks.
+The communication, particle-migration, halo-exchange, and public DistributedAutoPas API tests are MPI GoogleTests. CTest launches the distributed tests with the required rank count, including one- and four-rank public-API force checks and an eight-rank 3D ownership check.
 All tests can be run with:
 
 ```bash

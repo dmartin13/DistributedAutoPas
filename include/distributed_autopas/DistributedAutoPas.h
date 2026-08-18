@@ -31,19 +31,41 @@ class DistributedAutoPas {
  public:
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff)
-      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, [](auto &) {}) {}
+      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, std::array<bool, 3>{true, false, false}) {}
+
+  /**
+   * Construct a distributed container with a Cartesian process grid generated from
+   * the requested subdivision dimensions.
+   *
+   * Particle initialization and local AutoPas boxes already support arbitrary 3D
+   * process grids. Timestep migration and halo exchange are still restricted to the
+   * legacy x-only process grid and reject other layouts before communication starts.
+   */
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+                     double cutoff, const std::array<bool, 3> &subdivideDimensions)
+      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, subdivideDimensions, [](auto &) {}) {}
 
   /**
    * Construct and configure the node-local AutoPas instance before initialization.
    *
    * The configurator is currently an explicit customization point for AutoPas' local
    * tuning configuration. It is intentionally separate from all distributed concerns.
+   * This overload keeps the current x-only decomposition for backwards compatibility.
    */
   template <class Configurator>
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, Configurator &&configurator)
+      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, std::array<bool, 3>{true, false, false},
+                           std::forward<Configurator>(configurator)) {}
+
+  /**
+   * Construct and configure a distributed container with a Cartesian process grid.
+   */
+  template <class Configurator>
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+                     double cutoff, const std::array<bool, 3> &subdivideDimensions, Configurator &&configurator)
       : _runtime(runtime),
-        _domain(runtime.rank(), runtime.size(), globalMin, globalMax),
+        _domain(runtime.rank(), runtime.size(), globalMin, globalMax, subdivideDimensions),
         _particleMigration(runtime.communicator()),
         _haloExchange(runtime.communicator()),
         _cutoff(cutoff) {
@@ -225,6 +247,12 @@ class DistributedAutoPas {
 
  private:
   void synchronizeParticles() {
+    const auto &processGrid = _domain.processGrid();
+    if (processGrid[1] != 1 or processGrid[2] != 1) {
+      throw std::runtime_error(
+          "DistributedAutoPas: timestep migration and halo exchange currently support only x-only process grids.");
+    }
+
     auto emigrants = _autoPas.updateContainer();
     auto immigrants = _particleMigration.migrate(emigrants, _domain);
     _autoPas.addParticles(immigrants);

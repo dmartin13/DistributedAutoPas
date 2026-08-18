@@ -211,6 +211,11 @@ add_dap_mpi_gtest(
 )
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
+    DistributedAutoPasTest.UsesThreeDimensionalProcessGridForInitialOwnership
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
     DistributedAutoPasTest.ReducesDoubleValuesGlobally
     4
 )

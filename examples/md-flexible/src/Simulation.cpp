@@ -136,7 +136,7 @@ Simulation::Simulation(const MDFlexConfig &configuration, dap::Runtime &runtime)
   // only with the distributed particle API and does not access the local container directly.
   _distributedAutoPasContainer = std::make_shared<DistributedContainerType>(
       runtime, _configuration.boxMin.value, _configuration.boxMax.value, _configuration.cutoff.value,
-      [&](auto &autoPas) {
+      _configuration.subdivideDimension.value, [&](auto &autoPas) {
         autoPas.setAllowedCellSizeFactors(*_configuration.cellSizeFactors.value);
         autoPas.setAllowedContainers(_configuration.containerOptions.value);
         autoPas.setAllowedInteractionTypeOptions(_configuration.getInteractionTypes());
