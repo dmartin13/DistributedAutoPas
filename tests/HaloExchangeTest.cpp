@@ -129,4 +129,67 @@ TEST(HaloExchangeTest, ShiftsPeriodicRightHaloAboveGlobalDomain) {
   }
 }
 
+TEST(HaloExchangeTest, PropagatesFaceEdgeAndCornerHalosInThreeDimensions) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 8);
+
+  const std::array<double, 3> min{0., 0., 0.};
+  const std::array<double, 3> max{2., 2., 2.};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, min, max, std::array<int, 3>{2, 2, 2});
+  const dap::HaloExchange<Particle> haloExchange(MPI_COMM_WORLD);
+
+  std::vector<Particle> ownedParticles;
+  if (rank == 0) {
+    Particle particle;
+    particle.setID(5000);
+    particle.setR({0.9, 0.9, 0.9});
+    ownedParticles.push_back(particle);
+  }
+
+  const auto halos = haloExchange.exchange(ownedParticles, domain, haloWidth);
+
+  if (rank == 0) {
+    EXPECT_TRUE(halos.empty());
+    return;
+  }
+
+  ASSERT_EQ(halos.size(), 1);
+  EXPECT_EQ(halos.front().getID(), 5000);
+  EXPECT_EQ(halos.front().getR(), (std::array<double, 3>{0.9, 0.9, 0.9}));
+}
+
+TEST(HaloExchangeTest, ShiftsPeriodicCornerHaloAcrossAllDimensions) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 8);
+
+  const std::array<double, 3> min{0., 0., 0.};
+  const std::array<double, 3> max{2., 2., 2.};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, min, max, std::array<int, 3>{2, 2, 2});
+  const dap::HaloExchange<Particle> haloExchange(MPI_COMM_WORLD);
+
+  std::vector<Particle> ownedParticles;
+  if (rank == 7) {
+    Particle particle;
+    particle.setID(6000);
+    particle.setR({1.9, 1.9, 1.9});
+    ownedParticles.push_back(particle);
+  }
+
+  const auto halos = haloExchange.exchange(ownedParticles, domain, haloWidth);
+
+  if (rank == 0) {
+    ASSERT_EQ(halos.size(), 1);
+    EXPECT_EQ(halos.front().getID(), 6000);
+    EXPECT_NEAR(halos.front().getR()[0], -0.1, 1e-12);
+    EXPECT_NEAR(halos.front().getR()[1], -0.1, 1e-12);
+    EXPECT_NEAR(halos.front().getR()[2], -0.1, 1e-12);
+  }
+}
+
 }  // namespace

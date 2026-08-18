@@ -209,6 +209,60 @@ TEST(DistributedAutoPasTest, ReducesDoubleValuesGlobally) {
   particles.finalize();
 }
 
+TEST(DistributedAutoPasTest, ComputesInteractionAcrossThreeDimensionalCorner) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 8);
+
+  constexpr std::array<double, 3> boxMin{0., 0., 0.};
+  constexpr std::array<double, 3> boxMax{4., 4., 4.};
+  constexpr std::array<bool, 3> subdivideDimensions{true, true, true};
+  constexpr double threeDimensionalCutoff = 0.5;
+
+  dap::DistributedAutoPas<Particle> particles(runtime, boxMin, boxMax, threeDimensionalCutoff, subdivideDimensions,
+                                              makeConfigurator());
+
+  Particle lowerCornerParticle;
+  lowerCornerParticle.setID(7000);
+  lowerCornerParticle.setR({1.9, 1.9, 1.9});
+  lowerCornerParticle.setF({0., 0., 0.});
+
+  Particle upperCornerParticle;
+  upperCornerParticle.setID(7001);
+  upperCornerParticle.setR({2.1, 2.1, 2.1});
+  upperCornerParticle.setF({0., 0., 0.});
+
+  particles.addParticlesFromRoot(std::vector<Particle>{lowerCornerParticle, upperCornerParticle});
+
+  dap::testing::TestForceFunctor<Particle> functor(threeDimensionalCutoff);
+  particles.computeInteractions(&functor);
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 2);
+
+  if (runtime.rank() == 0) {
+    ASSERT_EQ(particles.getLocalNumberOfOwnedParticles(), 1);
+    particles.forEachOwnedParticle([](const auto &particle) {
+      EXPECT_EQ(particle.getID(), 7000);
+      EXPECT_NEAR(particle.getF()[0], 0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[1], 0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[2], 0.2, 1e-12);
+    });
+  } else if (runtime.rank() == 7) {
+    ASSERT_EQ(particles.getLocalNumberOfOwnedParticles(), 1);
+    particles.forEachOwnedParticle([](const auto &particle) {
+      EXPECT_EQ(particle.getID(), 7001);
+      EXPECT_NEAR(particle.getF()[0], -0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[1], -0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[2], -0.2, 1e-12);
+    });
+  } else {
+    EXPECT_EQ(particles.getLocalNumberOfOwnedParticles(), 0);
+  }
+
+  particles.finalize();
+}
+
 TEST(DistributedAutoPasTest, ComputesPeriodicForcesWithSingleRank) { expectForceTestResult(1); }
 
 TEST(DistributedAutoPasTest, ComputesSamePeriodicForcesAcrossFourRanks) { expectForceTestResult(4); }

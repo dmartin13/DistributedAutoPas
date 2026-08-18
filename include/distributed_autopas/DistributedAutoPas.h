@@ -37,10 +37,8 @@ class DistributedAutoPas {
    * Construct a distributed container with a Cartesian process grid generated from
    * the requested subdivision dimensions.
    *
-   * Particle initialization, local AutoPas boxes, and timestep migration already
-   * support arbitrary Cartesian process grids. Halo exchange is still restricted to
-   * the legacy x-only process grid, so force computation rejects other layouts before
-   * communication starts.
+   * Particle initialization, local AutoPas boxes, timestep migration, and halo
+   * exchange support arbitrary Cartesian process grids.
    */
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, const std::array<bool, 3> &subdivideDimensions)
@@ -248,11 +246,6 @@ class DistributedAutoPas {
 
  private:
   void synchronizeParticles() {
-    const auto &processGrid = _domain.processGrid();
-    if (processGrid[1] != 1 or processGrid[2] != 1) {
-      throw std::runtime_error("DistributedAutoPas: halo exchange currently supports only x-only process grids.");
-    }
-
     auto emigrants = _autoPas.updateContainer();
     auto immigrants = _particleMigration.migrate(emigrants, _domain);
     _autoPas.addParticles(immigrants);

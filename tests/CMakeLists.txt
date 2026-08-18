@@ -173,6 +173,16 @@ add_dap_mpi_gtest(
     HaloExchangeTest.ShiftsPeriodicRightHaloAboveGlobalDomain
     4
 )
+add_dap_mpi_gtest(
+    distributed_autopas_halo_exchange_tests
+    HaloExchangeTest.PropagatesFaceEdgeAndCornerHalosInThreeDimensions
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_halo_exchange_tests
+    HaloExchangeTest.ShiftsPeriodicCornerHaloAcrossAllDimensions
+    8
+)
 
 
 
@@ -238,6 +248,11 @@ add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
     DistributedAutoPasTest.ReducesDoubleValuesGlobally
     4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
+    DistributedAutoPasTest.ComputesInteractionAcrossThreeDimensionalCorner
+    8
 )
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
