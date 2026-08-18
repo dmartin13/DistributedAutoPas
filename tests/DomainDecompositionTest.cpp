@@ -196,4 +196,38 @@ TEST(DomainDecompositionTest, AppliesPeriodicBoundaryInXOnly) {
   EXPECT_DOUBLE_EQ(upperBoundary[0], 0.);
 }
 
+TEST(DomainDecompositionTest, UsesNoneBoundaryWithoutPeriodicWraparoundNeighbor) {
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::periodic, dap::BoundaryType::none,
+                                                        dap::BoundaryType::none};
+  const dap::DomainDecomposition corner(0, 8, {0., 0., 0.}, {2., 2., 2.}, std::array<int, 3>{2, 2, 2}, boundaries);
+
+  EXPECT_EQ(corner.precedingNeighbor(0), 4);
+  EXPECT_EQ(corner.precedingNeighbor(1), dap::DomainDecomposition::noNeighbor);
+  EXPECT_EQ(corner.precedingNeighbor(2), dap::DomainDecomposition::noNeighbor);
+  EXPECT_EQ(corner.succeedingNeighbor(1), 2);
+  EXPECT_EQ(corner.succeedingNeighbor(2), 1);
+  EXPECT_EQ(corner.neighborRank({-1, -1, 0}), dap::DomainDecomposition::noNeighbor);
+}
+
+TEST(DomainDecompositionTest, WrapsOnlyPeriodicDimensions) {
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::periodic, dap::BoundaryType::none,
+                                                        dap::BoundaryType::periodic};
+  const dap::DomainDecomposition domain(0, 1, {0., 0., 0.}, {2., 2., 2.}, std::array<int, 3>{1, 1, 1}, boundaries);
+
+  std::array<double, 3> position{-0.25, -0.25, 2.25};
+  domain.applyPeriodicBoundary(position);
+
+  EXPECT_DOUBLE_EQ(position[0], 1.75);
+  EXPECT_DOUBLE_EQ(position[1], -0.25);
+  EXPECT_DOUBLE_EQ(position[2], 0.25);
+}
+
+TEST(DomainDecompositionTest, RejectsReflectiveBoundariesUntilImplemented) {
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::periodic, dap::BoundaryType::reflective,
+                                                        dap::BoundaryType::none};
+
+  EXPECT_THROW((dap::DomainDecomposition{0, 1, {0., 0., 0.}, {2., 2., 2.}, std::array<int, 3>{1, 1, 1}, boundaries}),
+               std::invalid_argument);
+}
+
 }  // namespace

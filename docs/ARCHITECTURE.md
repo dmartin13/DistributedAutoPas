@@ -73,8 +73,9 @@ physical quantity that should be accumulated or written.
 - `DistributedAutoPas` can construct static Cartesian process grids from a subdivision mask and uses them for local AutoPas boxes and initial particle ownership
 - timestep migration supports Cartesian process grids through staged face-neighbor exchanges in x, y, and z
 - halo exchange supports Cartesian process grids through staged face-neighbor exchanges in x, y, and z; halos received in earlier stages are forwarded to generate edge and corner halos
-- the current Cartesian neighbor topology is periodic in every decomposed dimension, while timestep migration still applies global periodic wrapping only in x
-- the bundled md-flexible example therefore still forces `subdivide-dimension: [true, false, false]` until general per-dimension boundary handling is implemented
+- boundary conditions are configured per dimension; `periodic` and `none` are supported by migration and halo exchange
+- `reflective` is represented in the DistributedAutoPas API but intentionally rejected until reflective particle handling is implemented
+- the bundled md-flexible example forwards its `boundary-type` and `subdivide-dimension` settings to DistributedAutoPas
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
 - MPI is the only communication backend

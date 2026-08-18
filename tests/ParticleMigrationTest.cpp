@@ -244,4 +244,55 @@ TEST(ParticleMigrationTest, RoutesCornerMigrationThroughThreeDimensions) {
   }
 }
 
+TEST(ParticleMigrationTest, DropsParticlesAtNoneBoundary) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 4);
+
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::none, dap::BoundaryType::none,
+                                                        dap::BoundaryType::none};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, {0., 0., 0.}, {4., 1., 1.}, std::array<int, 3>{4, 1, 1},
+                                        boundaries);
+  const dap::ParticleMigration<Particle> migration(MPI_COMM_WORLD);
+
+  std::vector<Particle> emigrants;
+  if (rank == 0) {
+    emigrants.push_back(makeParticle(1100, {-0.25, 0.5, 0.5}));
+  }
+
+  const auto immigrants = migration.migrate(emigrants, domain);
+  EXPECT_TRUE(immigrants.empty());
+}
+
+TEST(ParticleMigrationTest, WrapsPeriodicYBoundaryInThreeDimensions) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 8);
+
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::periodic, dap::BoundaryType::periodic,
+                                                        dap::BoundaryType::none};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, {0., 0., 0.}, {2., 2., 2.}, std::array<int, 3>{2, 2, 2},
+                                        boundaries);
+  const dap::ParticleMigration<Particle> migration(MPI_COMM_WORLD);
+
+  std::vector<Particle> emigrants;
+  if (rank == 0) {
+    emigrants.push_back(makeParticle(1200, {0.5, -0.1, 0.5}));
+  }
+
+  const auto immigrants = migration.migrate(emigrants, domain);
+
+  if (rank == 2) {
+    ASSERT_EQ(immigrants.size(), 1);
+    EXPECT_EQ(immigrants.front().getID(), 1200);
+    EXPECT_EQ(immigrants.front().getR(), (std::array<double, 3>{0.5, 1.9, 0.5}));
+  } else {
+    EXPECT_TRUE(immigrants.empty());
+  }
+}
+
 }  // namespace

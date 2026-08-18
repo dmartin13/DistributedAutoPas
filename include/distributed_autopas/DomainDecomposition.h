@@ -2,6 +2,8 @@
 
 #include <array>
 
+#include "distributed_autopas/BoundaryType.h"
+
 namespace dap {
 
 /**
@@ -9,13 +11,11 @@ namespace dap {
  *
  * The decomposition itself is independent of the communication backend. Runtime
  * provides the process index and number of processes during construction.
- *
- * The legacy constructor without a process grid keeps the current DistributedAutoPas
- * behavior and decomposes only along x. Additional constructors can represent an
- * arbitrary 3D Cartesian process grid or derive one from a subdivision mask.
  */
 class DomainDecomposition {
  public:
+  static constexpr int noNeighbor = -1;
+
   DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin, std::array<double, 3> globalMax);
 
   DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin, std::array<double, 3> globalMax,
@@ -24,17 +24,20 @@ class DomainDecomposition {
   DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin, std::array<double, 3> globalMax,
                       std::array<int, 3> processGrid);
 
+  DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin, std::array<double, 3> globalMax,
+                      const std::array<bool, 3> &subdivideDimensions, const std::array<BoundaryType, 3> &boundaryTypes);
+
+  DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin, std::array<double, 3> globalMax,
+                      std::array<int, 3> processGrid, const std::array<BoundaryType, 3> &boundaryTypes);
+
   [[nodiscard]] static std::array<int, 3> generateProcessGrid(int numRanks,
                                                               const std::array<bool, 3> &subdivideDimensions);
 
-  /**
-   * Apply the periodic boundary used by the current 1D migration path.
-   *
-   * General per-dimension boundary handling will be introduced together with the
-   * 3D migration and halo-exchange implementation. For now this deliberately keeps
-   * the existing x-periodic behavior.
-   */
+  /** Wrap coordinates in every periodic dimension into the global simulation box. */
   void applyPeriodicBoundary(std::array<double, 3> &pos) const;
+
+  /** Wrap one coordinate if the selected dimension is periodic. */
+  void applyPeriodicBoundary(std::array<double, 3> &pos, int dimension) const;
 
   [[nodiscard]] bool isInsideLocalDomain(const std::array<double, 3> &pos) const;
 
@@ -47,8 +50,10 @@ class DomainDecomposition {
   [[nodiscard]] int coordinatesToRank(const std::array<int, 3> &coordinates) const;
 
   /**
-   * Return the periodically wrapped neighbor rank for a Cartesian grid offset.
-   * Offsets can describe faces, edges, or corners, e.g. {-1, 0, 1}.
+   * Return the neighbor rank for a Cartesian grid offset.
+   *
+   * Periodic dimensions wrap around the process grid. At a global boundary with
+   * BoundaryType::none, no neighbor exists and noNeighbor is returned.
    */
   [[nodiscard]] int neighborRank(const std::array<int, 3> &offset) const;
 
@@ -56,7 +61,6 @@ class DomainDecomposition {
 
   [[nodiscard]] int succeedingNeighbor(int dimension) const;
 
-  // Compatibility helpers for the current 1D migration and halo exchange.
   [[nodiscard]] int leftNeighbor() const;
 
   [[nodiscard]] int rightNeighbor() const;
@@ -68,6 +72,10 @@ class DomainDecomposition {
   [[nodiscard]] const std::array<int, 3> &processGrid() const;
 
   [[nodiscard]] const std::array<int, 3> &coordinates() const;
+
+  [[nodiscard]] const std::array<BoundaryType, 3> &boundaryTypes() const;
+
+  [[nodiscard]] BoundaryType boundaryType(int dimension) const;
 
   [[nodiscard]] const std::array<double, 3> &globalMin() const;
 
@@ -83,6 +91,7 @@ class DomainDecomposition {
 
   std::array<int, 3> _processGrid{1, 1, 1};
   std::array<int, 3> _coordinates{0, 0, 0};
+  std::array<BoundaryType, 3> _boundaryTypes{BoundaryType::periodic, BoundaryType::periodic, BoundaryType::periodic};
 
   std::array<double, 3> _globalMin{};
   std::array<double, 3> _globalMax{};

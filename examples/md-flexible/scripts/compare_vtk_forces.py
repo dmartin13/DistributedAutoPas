@@ -3,7 +3,7 @@
 Compare final owned-particle forces from two md-flexible VTK output trees.
 
 Usage:
-    python3 compare_vtk_forces.py <np1-output-root> <np4-output-root> [tolerance]
+    python3 compare_vtk_forces.py <first-output-root> <second-output-root> [tolerance]
 
 The script searches recursively for *_Particles_<rank>_<iteration>.vtu files,
 selects the largest iteration in each output tree, joins particles by ID, and

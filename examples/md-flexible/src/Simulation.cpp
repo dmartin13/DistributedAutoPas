@@ -79,6 +79,27 @@ size_t getTerminalWidth() {
 
   return terminalWidth;
 }
+
+std::array<dap::BoundaryType, 3> toDistributedBoundaryTypes(
+    const std::array<options::BoundaryTypeOption, 3> &boundaryTypes) {
+  std::array<dap::BoundaryType, 3> result{};
+
+  for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+    switch (static_cast<options::BoundaryTypeOption::Value>(boundaryTypes[dimension])) {
+      case options::BoundaryTypeOption::periodic:
+        result[dimension] = dap::BoundaryType::periodic;
+        break;
+      case options::BoundaryTypeOption::reflective:
+        result[dimension] = dap::BoundaryType::reflective;
+        break;
+      case options::BoundaryTypeOption::none:
+        result[dimension] = dap::BoundaryType::none;
+        break;
+    }
+  }
+
+  return result;
+}
 }  // namespace
 
 Simulation::Simulation(const MDFlexConfig &configuration, dap::Runtime &runtime)
@@ -136,7 +157,8 @@ Simulation::Simulation(const MDFlexConfig &configuration, dap::Runtime &runtime)
   // only with the distributed particle API and does not access the local container directly.
   _distributedAutoPasContainer = std::make_shared<DistributedContainerType>(
       runtime, _configuration.boxMin.value, _configuration.boxMax.value, _configuration.cutoff.value,
-      _configuration.subdivideDimension.value, [&](auto &autoPas) {
+      _configuration.subdivideDimension.value, toDistributedBoundaryTypes(_configuration.boundaryOption.value),
+      [&](auto &autoPas) {
         autoPas.setAllowedCellSizeFactors(*_configuration.cellSizeFactors.value);
         autoPas.setAllowedContainers(_configuration.containerOptions.value);
         autoPas.setAllowedInteractionTypeOptions(_configuration.getInteractionTypes());

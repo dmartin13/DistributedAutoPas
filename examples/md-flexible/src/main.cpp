@@ -23,11 +23,9 @@ int main(int argc, char **argv) {
   {
     MDFlexConfig configuration(argc, argv, runtime.isRoot());
 
-    // Transitional restriction while md-flexible is moved to DistributedAutoPas:
-    // the current DistributedAutoPas MVP decomposes only along x and has no
-    // distributed load balancing yet. Keep the printed md-flexible configuration
-    // consistent with the decomposition that is actually used.
-    configuration.subdivideDimension.value = {true, false, false};
+    // DistributedAutoPas now supports static Cartesian decompositions selected
+    // through md-flexible's subdivide-dimension option. Distributed load balancing
+    // is not implemented yet, so keep that feature disabled explicitly.
     configuration.loadBalancer.value = LoadBalancerOption::none;
 
     if (not configuration.checkpointfile.value.empty()) {

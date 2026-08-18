@@ -9,6 +9,7 @@
 #include "autopas/AutoPas.h"
 #include "autopas/options/IteratorBehavior.h"
 #include "autopas/utils/WrapOpenMP.h"
+#include "distributed_autopas/BoundaryType.h"
 #include "distributed_autopas/Communication.h"
 #include "distributed_autopas/DomainDecomposition.h"
 #include "distributed_autopas/HaloExchange.h"
@@ -31,40 +32,56 @@ class DistributedAutoPas {
  public:
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff)
-      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, std::array<bool, 3>{true, false, false}) {}
+      : DistributedAutoPas(
+            runtime, globalMin, globalMax, cutoff, std::array<bool, 3>{true, false, false},
+            std::array<BoundaryType, 3>{BoundaryType::periodic, BoundaryType::none, BoundaryType::none}) {}
 
-  /**
-   * Construct a distributed container with a Cartesian process grid generated from
-   * the requested subdivision dimensions.
-   *
-   * Particle initialization, local AutoPas boxes, timestep migration, and halo
-   * exchange support arbitrary Cartesian process grids.
-   */
+  /** Construct a distributed container with a Cartesian process grid. */
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, const std::array<bool, 3> &subdivideDimensions)
-      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, subdivideDimensions, [](auto &) {}) {}
+      : DistributedAutoPas(
+            runtime, globalMin, globalMax, cutoff, subdivideDimensions,
+            std::array<BoundaryType, 3>{BoundaryType::periodic, BoundaryType::periodic, BoundaryType::periodic}) {}
+
+  /** Construct a distributed container with explicit per-dimension boundary conditions. */
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+                     double cutoff, const std::array<bool, 3> &subdivideDimensions,
+                     const std::array<BoundaryType, 3> &boundaryTypes)
+      : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, subdivideDimensions, boundaryTypes, [](auto &) {}) {}
 
   /**
    * Construct and configure the node-local AutoPas instance before initialization.
-   *
-   * The configurator is currently an explicit customization point for AutoPas' local
-   * tuning configuration. It is intentionally separate from all distributed concerns.
-   * This overload keeps the current x-only decomposition for backwards compatibility.
+   * This overload keeps the legacy x-periodic decomposition for backwards compatibility.
    */
   template <class Configurator>
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, Configurator &&configurator)
       : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, std::array<bool, 3>{true, false, false},
+                           std::array<BoundaryType, 3>{BoundaryType::periodic, BoundaryType::none, BoundaryType::none},
                            std::forward<Configurator>(configurator)) {}
 
-  /**
-   * Construct and configure a distributed container with a Cartesian process grid.
-   */
+  /** Construct and configure a distributed container with a Cartesian process grid. */
   template <class Configurator>
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
                      double cutoff, const std::array<bool, 3> &subdivideDimensions, Configurator &&configurator)
+      : DistributedAutoPas(
+            runtime, globalMin, globalMax, cutoff, subdivideDimensions,
+            std::array<BoundaryType, 3>{BoundaryType::periodic, BoundaryType::periodic, BoundaryType::periodic},
+            std::forward<Configurator>(configurator)) {}
+
+  /**
+   * Construct and configure a distributed container with a Cartesian process grid
+   * and explicit per-dimension boundary conditions.
+   *
+   * periodic and none are currently supported. reflective is represented by the
+   * public BoundaryType but rejected until reflective particle handling is added.
+   */
+  template <class Configurator>
+  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
+                     double cutoff, const std::array<bool, 3> &subdivideDimensions,
+                     const std::array<BoundaryType, 3> &boundaryTypes, Configurator &&configurator)
       : _runtime(runtime),
-        _domain(runtime.rank(), runtime.size(), globalMin, globalMax, subdivideDimensions),
+        _domain(runtime.rank(), runtime.size(), globalMin, globalMax, subdivideDimensions, boundaryTypes),
         _particleMigration(runtime.communicator()),
         _haloExchange(runtime.communicator()),
         _cutoff(cutoff) {
@@ -227,6 +244,7 @@ class DistributedAutoPas {
   [[nodiscard]] const std::array<double, 3> &localBoxMax() const { return _domain.localMax(); }
   [[nodiscard]] const std::array<double, 3> &globalBoxMin() const { return _domain.globalMin(); }
   [[nodiscard]] const std::array<double, 3> &globalBoxMax() const { return _domain.globalMax(); }
+  [[nodiscard]] const std::array<BoundaryType, 3> &boundaryTypes() const { return _domain.boundaryTypes(); }
 
   // Local AutoPas metadata that is still used by md-flexible for tuning statistics.
   // These methods deliberately expose values, not the local container itself.

@@ -6,19 +6,44 @@
 #include <vector>
 
 namespace dap {
+namespace {
+constexpr std::array<BoundaryType, 3> periodicBoundaries{BoundaryType::periodic, BoundaryType::periodic,
+                                                         BoundaryType::periodic};
+constexpr std::array<BoundaryType, 3> legacyXPeriodicBoundaries{BoundaryType::periodic, BoundaryType::none,
+                                                                BoundaryType::none};
+}  // namespace
 
 DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin,
                                          std::array<double, 3> globalMax)
-    : DomainDecomposition(rank, numRanks, globalMin, globalMax, std::array<int, 3>{numRanks, 1, 1}) {}
+    : DomainDecomposition(rank, numRanks, globalMin, globalMax, std::array<int, 3>{numRanks, 1, 1},
+                          legacyXPeriodicBoundaries) {}
 
 DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin,
                                          std::array<double, 3> globalMax,
                                          const std::array<bool, 3> &subdivideDimensions)
-    : DomainDecomposition(rank, numRanks, globalMin, globalMax, generateProcessGrid(numRanks, subdivideDimensions)) {}
+    : DomainDecomposition(rank, numRanks, globalMin, globalMax, generateProcessGrid(numRanks, subdivideDimensions),
+                          periodicBoundaries) {}
 
 DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin,
                                          std::array<double, 3> globalMax, std::array<int, 3> processGrid)
-    : _rank(rank), _numRanks(numRanks), _processGrid(processGrid), _globalMin(globalMin), _globalMax(globalMax) {
+    : DomainDecomposition(rank, numRanks, globalMin, globalMax, processGrid, periodicBoundaries) {}
+
+DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin,
+                                         std::array<double, 3> globalMax,
+                                         const std::array<bool, 3> &subdivideDimensions,
+                                         const std::array<BoundaryType, 3> &boundaryTypes)
+    : DomainDecomposition(rank, numRanks, globalMin, globalMax, generateProcessGrid(numRanks, subdivideDimensions),
+                          boundaryTypes) {}
+
+DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<double, 3> globalMin,
+                                         std::array<double, 3> globalMax, std::array<int, 3> processGrid,
+                                         const std::array<BoundaryType, 3> &boundaryTypes)
+    : _rank(rank),
+      _numRanks(numRanks),
+      _processGrid(processGrid),
+      _boundaryTypes(boundaryTypes),
+      _globalMin(globalMin),
+      _globalMax(globalMax) {
   if (_numRanks <= 0) {
     throw std::invalid_argument("DistributedAutoPas: number of ranks must be positive.");
   }
@@ -35,6 +60,11 @@ DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<doub
 
     if (_globalMax[dimension] <= _globalMin[dimension]) {
       throw std::invalid_argument("DistributedAutoPas: global box must have positive extent in every dimension.");
+    }
+
+    if (_boundaryTypes[dimension] == BoundaryType::reflective) {
+      throw std::invalid_argument(
+          "DistributedAutoPas: reflective boundaries are not implemented yet. Use periodic or none.");
     }
 
     gridSize *= _processGrid[dimension];
@@ -104,14 +134,29 @@ std::array<int, 3> DomainDecomposition::generateProcessGrid(int numRanks,
 }
 
 void DomainDecomposition::applyPeriodicBoundary(std::array<double, 3> &pos) const {
-  const double lengthX = _globalMax[0] - _globalMin[0];
+  for (int dimension = 0; dimension < 3; ++dimension) {
+    applyPeriodicBoundary(pos, dimension);
+  }
+}
 
-  while (pos[0] < _globalMin[0]) {
-    pos[0] += lengthX;
+void DomainDecomposition::applyPeriodicBoundary(std::array<double, 3> &pos, int dimension) const {
+  if (dimension < 0 or dimension >= 3) {
+    throw std::invalid_argument("DistributedAutoPas: boundary dimension must be 0, 1, or 2.");
   }
 
-  while (pos[0] >= _globalMax[0]) {
-    pos[0] -= lengthX;
+  if (_boundaryTypes[dimension] != BoundaryType::periodic) {
+    return;
+  }
+
+  const auto dimensionIndex = static_cast<std::size_t>(dimension);
+  const double length = _globalMax[dimensionIndex] - _globalMin[dimensionIndex];
+
+  while (pos[dimensionIndex] < _globalMin[dimensionIndex]) {
+    pos[dimensionIndex] += length;
+  }
+
+  while (pos[dimensionIndex] >= _globalMax[dimensionIndex]) {
+    pos[dimensionIndex] -= length;
   }
 }
 
@@ -126,8 +171,11 @@ bool DomainDecomposition::isInsideLocalDomain(const std::array<double, 3> &pos) 
 
 bool DomainDecomposition::isInsideHaloRegion(const std::array<double, 3> &pos, double haloWidth) const {
   for (std::size_t dimension = 0; dimension < 3; ++dimension) {
-    const double lowerBound = _processGrid[dimension] > 1 ? _localMin[dimension] - haloWidth : _localMin[dimension];
-    const double upperBound = _processGrid[dimension] > 1 ? _localMax[dimension] + haloWidth : _localMax[dimension];
+    const bool hasPrecedingNeighbor = precedingNeighbor(static_cast<int>(dimension)) != noNeighbor;
+    const bool hasSucceedingNeighbor = succeedingNeighbor(static_cast<int>(dimension)) != noNeighbor;
+
+    const double lowerBound = hasPrecedingNeighbor ? _localMin[dimension] - haloWidth : _localMin[dimension];
+    const double upperBound = hasSucceedingNeighbor ? _localMax[dimension] + haloWidth : _localMax[dimension];
 
     if (pos[dimension] < lowerBound or pos[dimension] >= upperBound) {
       return false;
@@ -183,9 +231,18 @@ int DomainDecomposition::neighborRank(const std::array<int, 3> &offset) const {
   auto neighborCoordinates = _coordinates;
 
   for (std::size_t dimension = 0; dimension < 3; ++dimension) {
-    const int dimensionSize = _processGrid[dimension];
     const int shiftedCoordinate = neighborCoordinates[dimension] + offset[dimension];
-    neighborCoordinates[dimension] = ((shiftedCoordinate % dimensionSize) + dimensionSize) % dimensionSize;
+    const int dimensionSize = _processGrid[dimension];
+
+    if (shiftedCoordinate < 0 or shiftedCoordinate >= dimensionSize) {
+      if (_boundaryTypes[dimension] != BoundaryType::periodic) {
+        return noNeighbor;
+      }
+
+      neighborCoordinates[dimension] = ((shiftedCoordinate % dimensionSize) + dimensionSize) % dimensionSize;
+    } else {
+      neighborCoordinates[dimension] = shiftedCoordinate;
+    }
   }
 
   return coordinatesToRank(neighborCoordinates);
@@ -222,6 +279,15 @@ int DomainDecomposition::numRanks() const { return _numRanks; }
 const std::array<int, 3> &DomainDecomposition::processGrid() const { return _processGrid; }
 
 const std::array<int, 3> &DomainDecomposition::coordinates() const { return _coordinates; }
+
+const std::array<BoundaryType, 3> &DomainDecomposition::boundaryTypes() const { return _boundaryTypes; }
+
+BoundaryType DomainDecomposition::boundaryType(int dimension) const {
+  if (dimension < 0 or dimension >= 3) {
+    throw std::invalid_argument("DistributedAutoPas: boundary dimension must be 0, 1, or 2.");
+  }
+  return _boundaryTypes[static_cast<std::size_t>(dimension)];
+}
 
 const std::array<double, 3> &DomainDecomposition::globalMin() const { return _globalMin; }
 

@@ -136,6 +136,16 @@ add_dap_mpi_gtest(
     ParticleMigrationTest.RoutesCornerMigrationThroughThreeDimensions
     8
 )
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.DropsParticlesAtNoneBoundary
+    4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.WrapsPeriodicYBoundaryInThreeDimensions
+    8
+)
 
 add_executable(
     distributed_autopas_halo_exchange_tests
@@ -181,6 +191,11 @@ add_dap_mpi_gtest(
 add_dap_mpi_gtest(
     distributed_autopas_halo_exchange_tests
     HaloExchangeTest.ShiftsPeriodicCornerHaloAcrossAllDimensions
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_halo_exchange_tests
+    HaloExchangeTest.NoneBoundarySuppressesGlobalHaloButKeepsInternalHalo
     8
 )
 

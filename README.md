@@ -5,6 +5,8 @@ It keeps domain ownership, migration, halo exchange, and communication out of
 the simulator while reusing AutoPas for node-local particle storage and
 interaction traversal.
 
+The current static regular-grid implementation supports Cartesian decompositions in x, y, and z. Boundary conditions are selected per dimension. `periodic` and `none` are currently implemented; `reflective` is reserved in the API and will be added separately.
+
 ## Repository layout
 
 ```text
@@ -61,6 +63,38 @@ All tests can be run with:
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
+
+
+### md-flexible 3D force regression
+
+A small end-to-end regression input is available at
+`examples/md-flexible/input/dap_force_compare_3d.yaml`. It compares a single-rank
+reference run with an eight-rank `2 x 2 x 2` decomposition and exercises internal
+face, edge, and corner interactions as well as periodic boundaries in all three
+dimensions.
+
+From `build/examples/md-flexible`:
+
+```bash
+rm -rf force_compare_3d/np1 force_compare_3d/np8
+mkdir -p force_compare_3d/np1 force_compare_3d/np8
+
+./md-flexible \
+  --yaml-filename input/dap_force_compare_3d.yaml \
+  --vtk-output-folder force_compare_3d/np1
+
+mpirun -np 8 ./md-flexible \
+  --yaml-filename input/dap_force_compare_3d.yaml \
+  --vtk-output-folder force_compare_3d/np8
+
+python3 scripts/compare_vtk_forces.py \
+  force_compare_3d/np1 \
+  force_compare_3d/np8
+```
+
+The comparison should report the same owned-particle IDs and forces within the
+configured tolerance.
+
 
 The test build can be disabled with `-DDISTRIBUTED_AUTOPAS_BUILD_TESTS=OFF`.
 

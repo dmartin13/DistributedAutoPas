@@ -54,25 +54,31 @@ LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right
   const int sendLeftCount = static_cast<int>(sendLeftMessages.size());
   const int sendRightCount = static_cast<int>(sendRightMessages.size());
 
+  // The domain decomposition uses negative ranks to represent a missing neighbor
+  // at a non-periodic global boundary. Translate that backend-independent sentinel
+  // to MPI_PROC_NULL here so callers do not need MPI-specific boundary handling.
+  const int mpiLeft = left < 0 ? MPI_PROC_NULL : left;
+  const int mpiRight = right < 0 ? MPI_PROC_NULL : right;
+
   int recvFromLeftCount = 0;
   int recvFromRightCount = 0;
 
-  MPI_Sendrecv(&sendLeftCount, 1, MPI_INT, left, tag, &recvFromRightCount, 1, MPI_INT, right, tag, comm,
+  MPI_Sendrecv(&sendLeftCount, 1, MPI_INT, mpiLeft, tag, &recvFromRightCount, 1, MPI_INT, mpiRight, tag, comm,
                MPI_STATUS_IGNORE);
 
-  MPI_Sendrecv(&sendRightCount, 1, MPI_INT, right, tag + 1, &recvFromLeftCount, 1, MPI_INT, left, tag + 1, comm,
+  MPI_Sendrecv(&sendRightCount, 1, MPI_INT, mpiRight, tag + 1, &recvFromLeftCount, 1, MPI_INT, mpiLeft, tag + 1, comm,
                MPI_STATUS_IGNORE);
 
   std::vector<Message> recvFromLeftMessages(recvFromLeftCount);
   std::vector<Message> recvFromRightMessages(recvFromRightCount);
 
-  MPI_Sendrecv(sendLeftMessages.data(), sendLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE, left, tag + 2,
-               recvFromRightMessages.data(), recvFromRightCount * static_cast<int>(sizeof(Message)), MPI_BYTE, right,
+  MPI_Sendrecv(sendLeftMessages.data(), sendLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiLeft, tag + 2,
+               recvFromRightMessages.data(), recvFromRightCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiRight,
                tag + 2, comm, MPI_STATUS_IGNORE);
 
-  MPI_Sendrecv(sendRightMessages.data(), sendRightCount * static_cast<int>(sizeof(Message)), MPI_BYTE, right, tag + 3,
-               recvFromLeftMessages.data(), recvFromLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE, left,
-               tag + 3, comm, MPI_STATUS_IGNORE);
+  MPI_Sendrecv(sendRightMessages.data(), sendRightCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiRight,
+               tag + 3, recvFromLeftMessages.data(), recvFromLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE,
+               mpiLeft, tag + 3, comm, MPI_STATUS_IGNORE);
 
   return LeftRightExchange<Particle>{unpackParticles(recvFromLeftMessages), unpackParticles(recvFromRightMessages)};
 }

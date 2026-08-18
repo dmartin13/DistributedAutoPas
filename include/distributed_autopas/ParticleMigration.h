@@ -17,13 +17,13 @@ namespace dap {
 /**
  * Migrate particles between direct neighbors of a Cartesian process grid.
  *
- * Migration is performed dimension by dimension. This mirrors the regular-grid
- * strategy used by md-flexible: particles can move by at most one subdomain in
- * each dimension per timestep, while diagonal moves are routed through multiple
- * face-neighbor exchanges within the same migration call.
+ * Migration is performed dimension by dimension. Particles can move by at most
+ * one subdomain in each dimension per timestep, while diagonal moves are routed
+ * through multiple face-neighbor exchanges within the same migration call.
  *
- * Periodic wrapping is currently implemented only in x, matching the boundary
- * handling supported by the rest of DistributedAutoPas at this stage.
+ * Periodic boundaries wrap particles to the opposite side of the global box.
+ * BoundaryType::none discards particles that leave the global box. Reflective
+ * boundaries are currently rejected by DomainDecomposition.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class ParticleMigration {
@@ -36,16 +36,24 @@ class ParticleMigration {
 
     for (std::size_t dimension = 0; dimension < 3; ++dimension) {
       if (domain.processGrid()[dimension] == 1) {
-        // Preserve the existing x-periodic single-rank behavior even if x is not
-        // distributed. Periodic handling in y/z is introduced separately together
-        // with general boundary-condition support.
-        if (dimension == 0) {
-          for (auto &particle : remainingParticles) {
-            auto position = particle.getR();
-            domain.applyPeriodicBoundary(position);
+        std::vector<Particle> particlesInsideBoundary;
+        particlesInsideBoundary.reserve(remainingParticles.size());
+
+        for (auto particle : remainingParticles) {
+          auto position = particle.getR();
+
+          if (domain.boundaryType(static_cast<int>(dimension)) == BoundaryType::periodic) {
+            domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
             particle.setR(position);
+            particlesInsideBoundary.push_back(std::move(particle));
+          } else if (position[dimension] >= domain.globalMin()[dimension] and
+                     position[dimension] < domain.globalMax()[dimension]) {
+            particlesInsideBoundary.push_back(std::move(particle));
           }
+          // BoundaryType::none deliberately drops particles outside the global box.
         }
+
+        remainingParticles = std::move(particlesInsideBoundary);
         continue;
       }
 
@@ -61,16 +69,16 @@ class ParticleMigration {
         auto position = particle.getR();
 
         if (position[dimension] < domain.localMin()[dimension]) {
-          if (dimension == 0 and domain.coordinates()[dimension] == 0) {
-            const double globalLength = domain.globalMax()[dimension] - domain.globalMin()[dimension];
-            position[dimension] += globalLength;
+          if (domain.coordinates()[dimension] == 0 and
+              domain.boundaryType(static_cast<int>(dimension)) == BoundaryType::periodic) {
+            domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
             particle.setR(position);
           }
           sendPreceding.push_back(std::move(particle));
         } else if (position[dimension] >= domain.localMax()[dimension]) {
-          if (dimension == 0 and domain.coordinates()[dimension] == domain.processGrid()[dimension] - 1) {
-            const double globalLength = domain.globalMax()[dimension] - domain.globalMin()[dimension];
-            position[dimension] -= globalLength;
+          if (domain.coordinates()[dimension] == domain.processGrid()[dimension] - 1 and
+              domain.boundaryType(static_cast<int>(dimension)) == BoundaryType::periodic) {
+            domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
             particle.setR(position);
           }
           sendSucceeding.push_back(std::move(particle));
