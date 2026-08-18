@@ -22,8 +22,10 @@ namespace dap {
  * through multiple face-neighbor exchanges within the same migration call.
  *
  * Periodic boundaries wrap particles to the opposite side of the global box.
- * BoundaryType::none discards particles that leave the global box. Reflective
- * boundaries are currently rejected by DomainDecomposition.
+ * BoundaryType::none discards particles that leave the global box.
+ * BoundaryType::reflective is non-periodic and expects the application-level
+ * reflective force to keep particles inside the global box. Crossing a reflective
+ * boundary is treated as an error instead of silently deleting or wrapping the particle.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class ParticleMigration {
@@ -33,22 +35,28 @@ class ParticleMigration {
   [[nodiscard]] std::vector<Particle> migrate(const std::vector<Particle> &emigrants,
                                               const DomainDecomposition &domain) const {
     auto remainingParticles = emigrants;
+    bool crossedReflectiveBoundary = false;
 
     for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+      const auto boundaryType = domain.boundaryType(static_cast<int>(dimension));
+
       if (domain.processGrid()[dimension] == 1) {
         std::vector<Particle> particlesInsideBoundary;
         particlesInsideBoundary.reserve(remainingParticles.size());
 
         for (auto particle : remainingParticles) {
           auto position = particle.getR();
+          const bool outsideGlobalBoundary = position[dimension] < domain.globalMin()[dimension] or
+                                             position[dimension] >= domain.globalMax()[dimension];
 
-          if (domain.boundaryType(static_cast<int>(dimension)) == BoundaryType::periodic) {
+          if (boundaryType == BoundaryType::periodic) {
             domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
             particle.setR(position);
             particlesInsideBoundary.push_back(std::move(particle));
-          } else if (position[dimension] >= domain.globalMin()[dimension] and
-                     position[dimension] < domain.globalMax()[dimension]) {
+          } else if (not outsideGlobalBoundary) {
             particlesInsideBoundary.push_back(std::move(particle));
+          } else if (boundaryType == BoundaryType::reflective) {
+            crossedReflectiveBoundary = true;
           }
           // BoundaryType::none deliberately drops particles outside the global box.
         }
@@ -69,18 +77,38 @@ class ParticleMigration {
         auto position = particle.getR();
 
         if (position[dimension] < domain.localMin()[dimension]) {
-          if (domain.coordinates()[dimension] == 0 and
-              domain.boundaryType(static_cast<int>(dimension)) == BoundaryType::periodic) {
-            domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
-            particle.setR(position);
+          const bool crossesGlobalBoundary = domain.coordinates()[dimension] == 0;
+
+          if (crossesGlobalBoundary) {
+            if (boundaryType == BoundaryType::periodic) {
+              domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
+              particle.setR(position);
+            } else if (boundaryType == BoundaryType::reflective) {
+              crossedReflectiveBoundary = true;
+              continue;
+            } else {
+              // BoundaryType::none deliberately drops particles outside the global box.
+              continue;
+            }
           }
+
           sendPreceding.push_back(std::move(particle));
         } else if (position[dimension] >= domain.localMax()[dimension]) {
-          if (domain.coordinates()[dimension] == domain.processGrid()[dimension] - 1 and
-              domain.boundaryType(static_cast<int>(dimension)) == BoundaryType::periodic) {
-            domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
-            particle.setR(position);
+          const bool crossesGlobalBoundary = domain.coordinates()[dimension] == domain.processGrid()[dimension] - 1;
+
+          if (crossesGlobalBoundary) {
+            if (boundaryType == BoundaryType::periodic) {
+              domain.applyPeriodicBoundary(position, static_cast<int>(dimension));
+              particle.setR(position);
+            } else if (boundaryType == BoundaryType::reflective) {
+              crossedReflectiveBoundary = true;
+              continue;
+            } else {
+              // BoundaryType::none deliberately drops particles outside the global box.
+              continue;
+            }
           }
+
           sendSucceeding.push_back(std::move(particle));
         } else {
           stayForNextDimension.push_back(std::move(particle));
@@ -100,6 +128,15 @@ class ParticleMigration {
                                   exchange.recvFromRight.end());
 
       remainingParticles = std::move(stayForNextDimension);
+    }
+
+    // Error checks happen only after all staged neighbor exchanges have completed.
+    // This keeps error handling off the communication path without adding a global
+    // collective to every timestep.
+    if (crossedReflectiveBoundary) {
+      throw std::runtime_error(
+          "Particle crossed a reflective global boundary. The reflective force should keep particles inside the "
+          "simulation box; consider decreasing the timestep.");
     }
 
     for (const auto &particle : remainingParticles) {

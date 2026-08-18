@@ -122,7 +122,7 @@ def main():
             f"  id={particle_id:4d}  "
             f"rank {rank_a}->{rank_b}  "
             f"diff={diff:.12g}  "
-            f"np1={force_a}  np4={force_b}"
+            f"first={force_a}  second={force_b}"
         )
 
     if max_abs_diff <= tolerance:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <stdexcept>
@@ -73,8 +74,10 @@ class DistributedAutoPas {
    * Construct and configure a distributed container with a Cartesian process grid
    * and explicit per-dimension boundary conditions.
    *
-   * periodic and none are currently supported. reflective is represented by the
-   * public BoundaryType but rejected until reflective particle handling is added.
+   * periodic, reflective, and none are accepted as distributed boundary topology.
+   * Reflective boundaries are non-periodic for migration and halo exchange. The
+   * physical wall force itself is intentionally application-defined and is not
+   * applied by DistributedAutoPas.
    */
   template <class Configurator>
   DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
@@ -172,6 +175,44 @@ class DistributedAutoPas {
   }
 
   /**
+   * Execute a particle-local kernel for owned particles inside a spatial region.
+   *
+   * The requested region is intersected with this rank's local ownership box before
+   * it is forwarded to AutoPas. This keeps applications independent of the local
+   * container while allowing AutoPas to use its optimized region iterator.
+   *
+   * @param regionMin Lower corner of the requested region.
+   * @param regionMax Upper corner of the requested region.
+   * @param kernel Particle-local operation.
+   */
+  template <class Kernel>
+  void applyToOwnedParticlesInRegion(const std::array<double, 3> &regionMin, const std::array<double, 3> &regionMax,
+                                     Kernel &&kernel) {
+    std::array<double, 3> clippedMin{};
+    std::array<double, 3> clippedMax{};
+
+    for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+      if (regionMin[dimension] > regionMax[dimension]) {
+        throw std::invalid_argument("DistributedAutoPas: region minimum must not exceed region maximum.");
+      }
+
+      clippedMin[dimension] = std::max(regionMin[dimension], _domain.localMin()[dimension]);
+      clippedMax[dimension] = std::min(regionMax[dimension], _domain.localMax()[dimension]);
+
+      if (clippedMin[dimension] >= clippedMax[dimension]) {
+        return;
+      }
+    }
+
+    auto &&kernelRef = kernel;
+    AUTOPAS_OPENMP(parallel)
+    for (auto iter = _autoPas.getRegionIterator(clippedMin, clippedMax, autopas::IteratorBehavior::owned);
+         iter.isValid(); ++iter) {
+      kernelRef(*iter);
+    }
+  }
+
+  /**
    * Sum a particle-local quantity over all particles owned by this process.
    *
    * This is a local reduction. Distributed reductions are intentionally kept
@@ -202,15 +243,39 @@ class DistributedAutoPas {
   }
 
   /**
-   * Synchronize the distributed particle state and execute an ordinary AutoPas functor.
+   * Prepare the distributed particle state for one or more interaction calculations.
    *
-   * Migration and halo creation are implementation details of this operation. This
-   * keeps the simulator independent of the concrete communication algorithm.
+   * This updates the node-local container, migrates particles that changed ownership,
+   * and rebuilds the halo particles. Applications that need to apply additional
+   * physics between communication and the ordinary AutoPas interaction kernel can
+   * call this method explicitly.
+   */
+  void prepareInteractions() { synchronizeParticles(); }
+
+  /**
+   * Execute an AutoPas functor on a particle state prepared by prepareInteractions().
+   *
+   * No migration or halo exchange is triggered here. This is useful when several
+   * interaction functors operate on the same prepared distributed state or when
+   * application-level physics, such as a reflective wall force, must be applied
+   * after communication and before the ordinary particle interactions.
+   */
+  template <class Functor>
+  bool computeInteractionsPrepared(Functor *functor) {
+    return _autoPas.computeInteractions(functor);
+  }
+
+  /**
+   * Synchronize the distributed particle state and execute one ordinary AutoPas functor.
+   *
+   * This convenience operation keeps the original single-call API. Applications that
+   * need an explicit preparation phase should use prepareInteractions() followed by
+   * computeInteractionsPrepared().
    */
   template <class Functor>
   bool computeInteractions(Functor *functor) {
-    synchronizeParticles();
-    return _autoPas.computeInteractions(functor);
+    prepareInteractions();
+    return computeInteractionsPrepared(functor);
   }
 
   [[nodiscard]] std::size_t getLocalNumberOfOwnedParticles() const {

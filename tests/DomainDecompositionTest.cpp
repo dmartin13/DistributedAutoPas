@@ -222,12 +222,19 @@ TEST(DomainDecompositionTest, WrapsOnlyPeriodicDimensions) {
   EXPECT_DOUBLE_EQ(position[2], 0.25);
 }
 
-TEST(DomainDecompositionTest, RejectsReflectiveBoundariesUntilImplemented) {
+TEST(DomainDecompositionTest, TreatsReflectiveBoundaryAsNonPeriodicTopology) {
   constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::periodic, dap::BoundaryType::reflective,
                                                         dap::BoundaryType::none};
+  const dap::DomainDecomposition domain(0, 8, {0., 0., 0.}, {2., 2., 2.}, std::array<int, 3>{2, 2, 2}, boundaries);
 
-  EXPECT_THROW((dap::DomainDecomposition{0, 1, {0., 0., 0.}, {2., 2., 2.}, std::array<int, 3>{1, 1, 1}, boundaries}),
-               std::invalid_argument);
+  EXPECT_EQ(domain.precedingNeighbor(0), 4);
+  EXPECT_EQ(domain.precedingNeighbor(1), dap::DomainDecomposition::noNeighbor);
+  EXPECT_EQ(domain.succeedingNeighbor(1), 2);
+  EXPECT_EQ(domain.boundaryType(1), dap::BoundaryType::reflective);
+
+  std::array<double, 3> position{0.5, -0.25, 0.5};
+  domain.applyPeriodicBoundary(position);
+  EXPECT_DOUBLE_EQ(position[1], -0.25);
 }
 
 }  // namespace

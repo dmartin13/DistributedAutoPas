@@ -21,9 +21,9 @@ namespace dap {
  * all 26 possible neighbors.
  *
  * Periodic global boundaries create shifted periodic images. BoundaryType::none
- * has no neighbor outside the global simulation box and therefore creates no
- * halo across that boundary. Reflective boundaries are currently rejected by
- * DomainDecomposition.
+ * and BoundaryType::reflective are non-periodic communication boundaries and
+ * therefore create no halo across the global box boundary. Reflective wall
+ * forces are intentionally handled outside the distributed communication layer.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 class HaloExchange {

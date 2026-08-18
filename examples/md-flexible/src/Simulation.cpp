@@ -38,6 +38,7 @@ extern template bool autopas::AutoPas<ParticleType>::computeInteractions(LJFunct
 
 #include <iostream>
 
+#include "ReflectiveBoundary.h"
 #include "Thermostat.h"
 #include "TimeDiscretization.h"
 #include "autopas/utils/MemoryProfiler.h"
@@ -246,6 +247,13 @@ void Simulation::finalize() {
 
 void Simulation::run() {
   _timers.simulate.start();
+
+  double maximumSigma = 0.;
+  for (const auto &[siteType, sigma] : _configuration.sigmaMap.value) {
+    (void)siteType;
+    maximumSigma = std::max(maximumSigma, sigma);
+  }
+
   while (needsMoreIterations()) {
     if (_vtkWriter.has_value() and _iteration % _configuration.vtkWriteFrequency.value == 0) {
       _timers.vtk.start();
@@ -261,9 +269,15 @@ void Simulation::run() {
 #endif
     }
 
-    // DistributedAutoPas synchronizes migration and halo particles immediately before
-    // executing the interaction functor. The original md-flexible migration / halo
-    // exchange path is therefore deliberately bypassed here.
+    // Prepare the distributed particle state once for all interaction functors in this
+    // iteration. This keeps migration and halo exchange inside DistributedAutoPas while
+    // leaving application-specific boundary physics in md-flexible.
+    _distributedAutoPasContainer->prepareInteractions();
+
+    _timers.reflectParticlesAtBoundaries.start();
+    ReflectiveBoundary::apply(*_distributedAutoPasContainer, *_configuration.getParticlePropertiesLibrary(),
+                              maximumSigma);
+    _timers.reflectParticlesAtBoundaries.stop();
 
     updateInteractionForces();
 
@@ -512,7 +526,7 @@ long Simulation::accumulateTime(const long &time) { return _distributedAutoPasCo
 
 bool Simulation::calculatePairwiseForces() {
   const auto wasTuningIteration = applyWithChosenFunctor<bool>([&](auto &&functor) {
-    auto isTuningIteration = _distributedAutoPasContainer->computeInteractions(&functor);
+    auto isTuningIteration = _distributedAutoPasContainer->computeInteractionsPrepared(&functor);
 #ifdef MD_FLEXIBLE_CALC_GLOBALS
     _totalPotentialEnergy += functor.getPotentialEnergy();
     _totalVirialSum += functor.getVirial();
@@ -524,7 +538,7 @@ bool Simulation::calculatePairwiseForces() {
 
 bool Simulation::calculateTriwiseForces() {
   const auto wasTuningIteration = applyWithChosenFunctor3B<bool>([&](auto &&functor) {
-    auto isTuningIteration = _distributedAutoPasContainer->computeInteractions(&functor);
+    auto isTuningIteration = _distributedAutoPasContainer->computeInteractionsPrepared(&functor);
 #ifdef MD_FLEXIBLE_CALC_GLOBALS
     _totalPotentialEnergy += functor.getPotentialEnergy();
     _totalVirialSum += functor.getVirial();
@@ -612,7 +626,8 @@ void Simulation::logMeasurements() {
     std::cout << timerToString("    QuaternionUpdate              ", quaternionUpdate, maximumNumberOfDigits, simulate);
 #endif
     std::cout << timerToString("    UpdateContainer               ", updateContainer, maximumNumberOfDigits, simulate);
-    std::cout << timerToString("    Boundaries                    ", haloParticleExchange + migratingParticleExchange,
+    std::cout << timerToString("    Boundaries                    ",
+                               haloParticleExchange + reflectParticlesAtBoundaries + migratingParticleExchange,
                                maximumNumberOfDigits, simulate);
     std::cout << timerToString("      HaloParticleExchange        ", haloParticleExchange, maximumNumberOfDigits,
                                haloParticleExchange + reflectParticlesAtBoundaries + migratingParticleExchange);

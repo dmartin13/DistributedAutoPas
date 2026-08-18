@@ -53,7 +53,8 @@ class DomainDecomposition {
    * Return the neighbor rank for a Cartesian grid offset.
    *
    * Periodic dimensions wrap around the process grid. At a global boundary with
-   * BoundaryType::none, no neighbor exists and noNeighbor is returned.
+   * a non-periodic boundary type (`none` or `reflective`), no neighbor exists and
+   * noNeighbor is returned.
    */
   [[nodiscard]] int neighborRank(const std::array<int, 3> &offset) const;
 

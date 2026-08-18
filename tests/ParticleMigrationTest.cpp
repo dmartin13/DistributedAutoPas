@@ -3,6 +3,7 @@
 
 #include <array>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "distributed_autopas/DomainDecomposition.h"
@@ -292,6 +293,65 @@ TEST(ParticleMigrationTest, WrapsPeriodicYBoundaryInThreeDimensions) {
     EXPECT_EQ(immigrants.front().getR(), (std::array<double, 3>{0.5, 1.9, 0.5}));
   } else {
     EXPECT_TRUE(immigrants.empty());
+  }
+}
+
+TEST(ParticleMigrationTest, RejectsParticleCrossingReflectiveBoundary) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 4);
+
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::reflective, dap::BoundaryType::none,
+                                                        dap::BoundaryType::none};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, {0., 0., 0.}, {4., 1., 1.}, std::array<int, 3>{4, 1, 1},
+                                        boundaries);
+  const dap::ParticleMigration<Particle> migration(MPI_COMM_WORLD);
+
+  std::vector<Particle> emigrants;
+  if (rank == 0) {
+    emigrants.push_back(makeParticle(1300, {-0.25, 0.5, 0.5}));
+  }
+
+  if (rank == 0) {
+    EXPECT_THROW(
+        {
+          try {
+            (void)migration.migrate(emigrants, domain);
+          } catch (const std::runtime_error &error) {
+            EXPECT_NE(std::string{error.what()}.find("reflective global boundary"), std::string::npos);
+            throw;
+          }
+        },
+        std::runtime_error);
+  } else {
+    EXPECT_NO_THROW(migration.migrate(emigrants, domain));
+  }
+}
+
+TEST(ParticleMigrationTest, RejectsReflectiveCrossingWithoutSubdivisionInThatDimension) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 4);
+
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::reflective, dap::BoundaryType::none,
+                                                        dap::BoundaryType::none};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, {0., 0., 0.}, {1., 4., 1.}, std::array<int, 3>{1, 4, 1},
+                                        boundaries);
+  const dap::ParticleMigration<Particle> migration(MPI_COMM_WORLD);
+
+  std::vector<Particle> emigrants;
+  if (rank == 0) {
+    emigrants.push_back(makeParticle(1400, {-0.1, 0.5, 0.5}));
+  }
+
+  if (rank == 0) {
+    EXPECT_THROW(migration.migrate(emigrants, domain), std::runtime_error);
+  } else {
+    EXPECT_NO_THROW(migration.migrate(emigrants, domain));
   }
 }
 

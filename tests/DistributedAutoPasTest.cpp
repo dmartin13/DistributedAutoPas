@@ -62,7 +62,7 @@ std::vector<Particle> makeForceTestParticles() {
   return particles;
 }
 
-void expectForceTestResult(int expectedNumberOfRanks) {
+void expectForceTestResult(int expectedNumberOfRanks, bool explicitPreparation = false) {
   int argc = 0;
   char **argv = nullptr;
   dap::Runtime runtime(argc, argv);
@@ -72,7 +72,12 @@ void expectForceTestResult(int expectedNumberOfRanks) {
   particles.addParticlesFromRoot(makeForceTestParticles());
 
   dap::testing::TestForceFunctor<Particle> functor(forceCutoff);
-  particles.computeInteractions(&functor);
+  if (explicitPreparation) {
+    particles.prepareInteractions();
+    particles.computeInteractionsPrepared(&functor);
+  } else {
+    particles.computeInteractions(&functor);
+  }
 
   constexpr std::array<double, 8> expectedForceX{0.0, 0.3, -0.3, 0.2, -0.2, 0.3, -0.3, 0.0};
 
@@ -209,6 +214,37 @@ TEST(DistributedAutoPasTest, ReducesDoubleValuesGlobally) {
   particles.finalize();
 }
 
+TEST(DistributedAutoPasTest, AppliesKernelOnlyToOwnedParticlesInRegion) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 1);
+
+  dap::DistributedAutoPas<Particle> particles(runtime, globalMin, globalMax, cutoff, makeConfigurator());
+
+  auto firstParticle = makeParticle(0, 0.25);
+  auto secondParticle = makeParticle(1, 1.25);
+  auto thirdParticle = makeParticle(2, 3.75);
+  firstParticle.setF({0., 0., 0.});
+  secondParticle.setF({0., 0., 0.});
+  thirdParticle.setF({0., 0., 0.});
+  particles.addParticlesFromRoot(std::vector<Particle>{firstParticle, secondParticle, thirdParticle});
+
+  particles.applyToOwnedParticlesInRegion({-1., 0., 0.}, {1., 1., 1.}, [](auto &particle) {
+    particle.setF({42., 0., 0.});
+  });
+
+  particles.forEachOwnedParticle([](const auto &particle) {
+    if (particle.getID() == 0) {
+      EXPECT_DOUBLE_EQ(particle.getF()[0], 42.);
+    } else {
+      EXPECT_DOUBLE_EQ(particle.getF()[0], 0.);
+    }
+  });
+
+  particles.finalize();
+}
+
 TEST(DistributedAutoPasTest, ComputesInteractionAcrossThreeDimensionalCorner) {
   int argc = 0;
   char **argv = nullptr;
@@ -266,5 +302,7 @@ TEST(DistributedAutoPasTest, ComputesInteractionAcrossThreeDimensionalCorner) {
 TEST(DistributedAutoPasTest, ComputesPeriodicForcesWithSingleRank) { expectForceTestResult(1); }
 
 TEST(DistributedAutoPasTest, ComputesSamePeriodicForcesAcrossFourRanks) { expectForceTestResult(4); }
+
+TEST(DistributedAutoPasTest, ComputesForcesAfterExplicitPreparation) { expectForceTestResult(4, true); }
 
 }  // namespace

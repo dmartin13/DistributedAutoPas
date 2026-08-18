@@ -62,11 +62,6 @@ DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<doub
       throw std::invalid_argument("DistributedAutoPas: global box must have positive extent in every dimension.");
     }
 
-    if (_boundaryTypes[dimension] == BoundaryType::reflective) {
-      throw std::invalid_argument(
-          "DistributedAutoPas: reflective boundaries are not implemented yet. Use periodic or none.");
-    }
-
     gridSize *= _processGrid[dimension];
   }
 

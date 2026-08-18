@@ -222,4 +222,34 @@ TEST(HaloExchangeTest, NoneBoundarySuppressesGlobalHaloButKeepsInternalHalo) {
   }
 }
 
+TEST(HaloExchangeTest, ReflectiveBoundarySuppressesGlobalHaloButKeepsInternalHalo) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+  ASSERT_EQ(numberOfRanks, 4);
+
+  constexpr std::array<dap::BoundaryType, 3> boundaries{dap::BoundaryType::reflective, dap::BoundaryType::none,
+                                                        dap::BoundaryType::none};
+  const dap::DomainDecomposition domain(rank, numberOfRanks, {0., 0., 0.}, {4., 1., 1.}, std::array<int, 3>{4, 1, 1},
+                                        boundaries);
+  const dap::HaloExchange<Particle> haloExchange(MPI_COMM_WORLD);
+
+  std::vector<Particle> ownedParticles;
+  if (rank == 0) {
+    ownedParticles.push_back(makeParticle(8000, 0.1));
+    ownedParticles.push_back(makeParticle(8001, 0.9));
+  }
+
+  const auto halos = haloExchange.exchange(ownedParticles, domain, haloWidth);
+
+  if (rank == 1) {
+    ASSERT_EQ(halos.size(), 1);
+    EXPECT_EQ(halos.front().getID(), 8001);
+    EXPECT_NEAR(halos.front().getR()[0], 0.9, 1e-12);
+  } else {
+    EXPECT_TRUE(halos.empty());
+  }
+}
+
 }  // namespace

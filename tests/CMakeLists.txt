@@ -1,6 +1,7 @@
 add_executable(
     distributed_autopas_tests
     DomainDecompositionTest.cpp
+    ReflectiveBoundaryTest.cpp
 )
 
 target_link_libraries(
@@ -8,6 +9,12 @@ target_link_libraries(
     PRIVATE
         distributed_autopas
         GTest::gtest_main
+)
+
+target_include_directories(
+    distributed_autopas_tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../examples/md-flexible"
 )
 
 target_compile_features(distributed_autopas_tests PRIVATE cxx_std_20)
@@ -146,6 +153,16 @@ add_dap_mpi_gtest(
     ParticleMigrationTest.WrapsPeriodicYBoundaryInThreeDimensions
     8
 )
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.RejectsParticleCrossingReflectiveBoundary
+    4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.RejectsReflectiveCrossingWithoutSubdivisionInThatDimension
+    4
+)
 
 add_executable(
     distributed_autopas_halo_exchange_tests
@@ -197,6 +214,11 @@ add_dap_mpi_gtest(
     distributed_autopas_halo_exchange_tests
     HaloExchangeTest.NoneBoundarySuppressesGlobalHaloButKeepsInternalHalo
     8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_halo_exchange_tests
+    HaloExchangeTest.ReflectiveBoundarySuppressesGlobalHaloButKeepsInternalHalo
+    4
 )
 
 
@@ -266,6 +288,11 @@ add_dap_mpi_gtest(
 )
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
+    DistributedAutoPasTest.AppliesKernelOnlyToOwnedParticlesInRegion
+    1
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
     DistributedAutoPasTest.ComputesInteractionAcrossThreeDimensionalCorner
     8
 )
@@ -277,5 +304,10 @@ add_dap_mpi_gtest(
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
     DistributedAutoPasTest.ComputesSamePeriodicForcesAcrossFourRanks
+    4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
+    DistributedAutoPasTest.ComputesForcesAfterExplicitPreparation
     4
 )

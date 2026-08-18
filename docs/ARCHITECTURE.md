@@ -31,15 +31,26 @@ The public API should describe operations, not local storage details. Examples:
 
 ```cpp
 particles.applyToOwnedParticles(PositionUpdate{dt});
+particles.applyToOwnedParticlesInRegion(wallMin, wallMax, WallOperation{});
 auto localKineticEnergy = particles.sumOwnedParticles(0.0, KineticEnergy{});
-particles.computeInteractions(&ljFunctor);
+particles.prepareInteractions();
+applyApplicationBoundaryPhysics(particles);
+particles.computeInteractionsPrepared(&ljFunctor);
 auto globalCount = particles.getGlobalNumberOfOwnedParticles();
 ```
 
 Local AutoPas iterators, halo exchange, migration, and communication contexts
-are implementation details. The public API intentionally provides no access to the
-node-local AutoPas container. Diagnostics and output consume particle traversal and
-local tuning metadata through dedicated DistributedAutoPas operations.
+are implementation details. `prepareInteractions()` exposes only the high-level
+preparation phase, not the individual migration or halo operations. This allows an
+application to insert physics such as a reflective wall force before invoking one or
+more AutoPas functors on the prepared state. `computeInteractions()` remains the
+convenience operation for the common prepare-and-compute case. The public API
+intentionally provides no access to the node-local AutoPas container. Diagnostics
+and output consume particle traversal and local tuning metadata through dedicated
+DistributedAutoPas operations. Spatially restricted application kernels use
+`applyToOwnedParticlesInRegion()`. DistributedAutoPas clips the requested region to
+the rank-local ownership box and delegates the traversal to AutoPas without exposing
+its region iterator to the application.
 
 
 ## Initial particle distribution
@@ -73,8 +84,9 @@ physical quantity that should be accumulated or written.
 - `DistributedAutoPas` can construct static Cartesian process grids from a subdivision mask and uses them for local AutoPas boxes and initial particle ownership
 - timestep migration supports Cartesian process grids through staged face-neighbor exchanges in x, y, and z
 - halo exchange supports Cartesian process grids through staged face-neighbor exchanges in x, y, and z; halos received in earlier stages are forwarded to generate edge and corner halos
-- boundary conditions are configured per dimension; `periodic` and `none` are supported by migration and halo exchange
-- `reflective` is represented in the DistributedAutoPas API but intentionally rejected until reflective particle handling is implemented
+- boundary conditions are configured per dimension; `periodic`, `reflective`, and `none` are supported as distributed topology
+- `reflective` is non-periodic for migration and halo exchange; crossing a reflective global boundary is reported as an error, while the physical reflective wall force remains application-level physics
+- the bundled single-site md-flexible example applies its original Lennard-Jones mirror-wall model through a separate `ReflectiveBoundary` component between distributed preparation and ordinary AutoPas interaction functors; only thin wall-adjacent regions are traversed through `applyToOwnedParticlesInRegion()`
 - the bundled md-flexible example forwards its `boundary-type` and `subdivide-dimension` settings to DistributedAutoPas
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
