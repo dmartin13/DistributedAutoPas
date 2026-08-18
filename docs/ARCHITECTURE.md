@@ -71,7 +71,8 @@ physical quantity that should be accumulated or written.
 ## Current limitations
 
 - `DistributedAutoPas` can construct static Cartesian process grids from a subdivision mask and uses them for local AutoPas boxes and initial particle ownership
-- timestep migration and halo exchange are still implemented for x-only process grids and reject other layouts before communication starts
+- timestep migration supports Cartesian process grids through staged face-neighbor exchanges in x, y, and z
+- halo exchange is still implemented for x-only process grids, so force computation rejects other layouts before communication starts
 - the bundled md-flexible example therefore still forces `subdivide-dimension: [true, false, false]` until 3D synchronization is implemented
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only

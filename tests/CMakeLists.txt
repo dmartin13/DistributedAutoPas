@@ -116,6 +116,26 @@ add_dap_mpi_gtest(
     ParticleMigrationTest.RejectsMovementAcrossMoreThanOneSubdomain
     4
 )
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.MigratesAcrossYFaceInThreeDimensions
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.MigratesAcrossZFaceInThreeDimensions
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.RoutesEdgeMigrationThroughTwoDimensions
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_particle_migration_tests
+    ParticleMigrationTest.RoutesCornerMigrationThroughThreeDimensions
+    8
+)
 
 add_executable(
     distributed_autopas_halo_exchange_tests
