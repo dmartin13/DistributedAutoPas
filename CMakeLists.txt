@@ -18,6 +18,18 @@ option(
     ${_dap_build_examples_default}
 )
 
+# Build tests by default for a standalone checkout, but keep them disabled when
+# DistributedAutoPas is embedded into another project unless explicitly requested.
+set(_dap_build_tests_default OFF)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_dap_build_tests_default ON)
+endif()
+option(
+    DISTRIBUTED_AUTOPAS_BUILD_TESTS
+    "Build DistributedAutoPas tests"
+    ${_dap_build_tests_default}
+)
+
 # The bundled md-flexible example currently supports the single-site particle
 # model only. This value has to be known while AutoPas' applicationLibrary is
 # configured.
@@ -82,6 +94,34 @@ target_link_libraries(
 
 target_compile_features(distributed_autopas PUBLIC cxx_std_20)
 
+if(DISTRIBUTED_AUTOPAS_BUILD_TESTS)
+    enable_testing()
+
+    # Reuse a GoogleTest target provided by a parent project when available.
+    # Otherwise prefer an installed package and finally fetch a pinned release.
+    if(TARGET gtest AND NOT TARGET GTest::gtest)
+        add_library(GTest::gtest ALIAS gtest)
+    endif()
+    if(TARGET gtest_main AND NOT TARGET GTest::gtest_main)
+        add_library(GTest::gtest_main ALIAS gtest_main)
+    endif()
+
+    if(NOT TARGET GTest::gtest OR NOT TARGET GTest::gtest_main)
+        find_package(GTest CONFIG QUIET)
+    endif()
+
+    if(NOT TARGET GTest::gtest OR NOT TARGET GTest::gtest_main)
+        include(FetchContent)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.zip
+        )
+        FetchContent_MakeAvailable(googletest)
+    endif()
+
+    add_subdirectory(tests)
+endif()
+
 if(DISTRIBUTED_AUTOPAS_BUILD_EXAMPLES)
     if(NOT DEFINED AUTOPAS_SOURCE_DIR OR NOT EXISTS "${AUTOPAS_SOURCE_DIR}/CMakeLists.txt")
         message(FATAL_ERROR
@@ -101,6 +141,8 @@ if(CLANG_FORMAT_EXE)
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/examples/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h"
     )
 
     # Use a project-specific target name so this is safe when AutoPas and

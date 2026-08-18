@@ -51,5 +51,18 @@ and the smaller LJ integration example at:
 build/examples/md-flexible/distributed-lj-example
 ```
 
+## Tests
+
+DistributedAutoPas tests use GoogleTest and are enabled by default for a standalone checkout.
+The communication, particle-migration, halo-exchange, and public DistributedAutoPas API tests are MPI GoogleTests. CTest launches the distributed tests with the required rank count, including one- and four-rank public-API force checks.
+All tests can be run with:
+
+```bash
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+The test build can be disabled with `-DDISTRIBUTED_AUTOPAS_BUILD_TESTS=OFF`.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current architecture
 and transition plan.
