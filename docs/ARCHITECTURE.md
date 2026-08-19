@@ -75,9 +75,11 @@ The direct-neighbor particle transport now also provides a split-phase
 a small count handshake to size receive buffers and then posts the particle payload
 with `MPI_Irecv` / `MPI_Isend`. The payload can remain in flight while the caller does
 independent work. The existing `exchangeLeftRight()` operation retains its original blocking
-`MPI_Sendrecv` implementation and is still used by migration and halo exchange at
-this stage. This intentionally separates introducing non-blocking transport from
-changing the distributed algorithms to exploit overlap.
+`MPI_Sendrecv` implementation as a reference path. Timestep migration now uses the
+split-phase non-blocking transport but finishes each exchange immediately, so its
+algorithm and synchronization semantics are unchanged. Halo exchange still uses
+the blocking reference path. This intentionally separates adopting non-blocking
+transport from introducing actual communication/computation overlap.
 
 ## Particle-local reductions
 
@@ -99,7 +101,7 @@ physical quantity that should be accumulated or written.
 - the bundled md-flexible example forwards its `boundary-type` and `subdivide-dimension` settings to DistributedAutoPas
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
-- direct-neighbor transport has a non-blocking split-phase payload API, while timestep migration and halo exchange still use the original blocking `MPI_Sendrecv` reference path and therefore do not overlap communication with computation yet
+- direct-neighbor transport has a non-blocking split-phase payload API; timestep migration uses it without overlap yet, while halo exchange still uses the original blocking `MPI_Sendrecv` reference path
 - MPI is the only communication backend
 
 ## Bundled example application

@@ -115,10 +115,11 @@ class ParticleMigration {
         }
       }
 
-      const auto exchange =
-          exchangeLeftRight<Particle, Serializer>(_comm, domain.precedingNeighbor(static_cast<int>(dimension)),
-                                                  domain.succeedingNeighbor(static_cast<int>(dimension)), sendPreceding,
-                                                  sendSucceeding, 100 + static_cast<int>(dimension) * 10);
+      auto exchangeRequest = beginLeftRightExchange<Particle, Serializer>(
+          _comm, domain.precedingNeighbor(static_cast<int>(dimension)),
+          domain.succeedingNeighbor(static_cast<int>(dimension)), sendPreceding, sendSucceeding,
+          100 + static_cast<int>(dimension) * 10);
+      const auto exchange = finishLeftRightExchange(exchangeRequest);
 
       stayForNextDimension.reserve(stayForNextDimension.size() + exchange.recvFromLeft.size() +
                                    exchange.recvFromRight.size());
