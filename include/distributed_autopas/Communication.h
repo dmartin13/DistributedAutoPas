@@ -199,10 +199,10 @@ LeftRightExchange<Particle> finishLeftRightExchange(LeftRightExchangeRequest<Par
 /**
  * Blocking reference exchange with the direct left and right neighbors.
  *
- * This intentionally retains the previous MPI_Sendrecv implementation. Migration
- * and halo exchange continue to use this path for now. Keeping the blocking path
- * unchanged gives us a clean reference implementation while the split-phase API
- * is introduced and tested independently.
+ * This intentionally retains the previous MPI_Sendrecv implementation as a
+ * reference path. Timestep migration and halo exchange use the split-phase
+ * non-blocking transport, while this function remains available for correctness
+ * and later performance comparisons.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right, const std::vector<Particle> &sendLeft,

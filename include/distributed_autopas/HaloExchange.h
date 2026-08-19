@@ -61,9 +61,10 @@ class HaloExchange {
         }
       }
 
-      auto exchange =
-          exchangeLeftRight<Particle, Serializer>(_comm, precedingNeighbor, succeedingNeighbor, sendPreceding,
-                                                  sendSucceeding, 300 + static_cast<int>(dimension) * 10);
+      auto exchangeRequest =
+          beginLeftRightExchange<Particle, Serializer>(_comm, precedingNeighbor, succeedingNeighbor, sendPreceding,
+                                                       sendSucceeding, 300 + static_cast<int>(dimension) * 10);
+      auto exchange = finishLeftRightExchange(exchangeRequest);
 
       shiftPeriodicImages(exchange.recvFromLeft, domain, dimension, true);
       shiftPeriodicImages(exchange.recvFromRight, domain, dimension, false);
