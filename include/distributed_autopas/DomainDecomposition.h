@@ -7,8 +7,10 @@
 namespace dap {
 
 /**
- * Static regular-grid domain decomposition.
+ * Cartesian regular-grid domain decomposition.
  *
+ * The decomposition starts with equally sized subdomains. The local box can later
+ * be resized by a load balancer while the Cartesian process topology stays fixed.
  * The decomposition itself is independent of the communication backend. Runtime
  * provides the process index and number of processes during construction.
  */
@@ -44,6 +46,14 @@ class DomainDecomposition {
   [[nodiscard]] bool isInsideHaloRegion(const std::array<double, 3> &pos, double haloWidth) const;
 
   [[nodiscard]] int targetRank(const std::array<double, 3> &pos) const;
+
+  /**
+   * Update the local ownership box while keeping the Cartesian process topology fixed.
+   *
+   * This is the geometry change required by adaptive regular-grid load balancing.
+   * Neighboring ranks are responsible for choosing matching shared boundaries.
+   */
+  void setLocalBox(std::array<double, 3> localMin, std::array<double, 3> localMax);
 
   [[nodiscard]] std::array<int, 3> rankToCoordinates(int rank) const;
 

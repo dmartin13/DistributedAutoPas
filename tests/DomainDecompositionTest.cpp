@@ -92,6 +92,27 @@ TEST(DomainDecompositionTest, DeterminesTargetRankInThreeDimensions) {
   EXPECT_EQ(domain.targetRank({7.999, 5.999, 3.999}), 11);
 }
 
+TEST(DomainDecompositionTest, UpdatesLocalBoxForAdaptiveDecomposition) {
+  dap::DomainDecomposition domain(1, 4, globalMin, globalMax);
+
+  domain.setLocalBox({2., 1., 2.}, {5.5, 11., 12.});
+
+  EXPECT_EQ(domain.localMin(), (std::array<double, 3>{2., 1., 2.}));
+  EXPECT_EQ(domain.localMax(), (std::array<double, 3>{5.5, 11., 12.}));
+  EXPECT_TRUE(domain.isInsideLocalDomain({2., 5., 5.}));
+  EXPECT_TRUE(domain.isInsideLocalDomain({5.499, 5., 5.}));
+  EXPECT_FALSE(domain.isInsideLocalDomain({1.999, 5., 5.}));
+  EXPECT_FALSE(domain.isInsideLocalDomain({5.5, 5., 5.}));
+}
+
+TEST(DomainDecompositionTest, RejectsInvalidAdaptiveLocalBox) {
+  dap::DomainDecomposition domain(1, 4, globalMin, globalMax);
+
+  EXPECT_THROW(domain.setLocalBox({-0.1, 1., 2.}, {5., 11., 12.}), std::invalid_argument);
+  EXPECT_THROW(domain.setLocalBox({2.5, 1., 2.}, {10.1, 11., 12.}), std::invalid_argument);
+  EXPECT_THROW(domain.setLocalBox({5., 1., 2.}, {5., 11., 12.}), std::invalid_argument);
+}
+
 TEST(DomainDecompositionTest, FindsPeriodicFaceEdgeAndCornerNeighbors) {
   constexpr std::array<double, 3> boxMin{0., 0., 0.};
   constexpr std::array<double, 3> boxMax{3., 3., 3.};

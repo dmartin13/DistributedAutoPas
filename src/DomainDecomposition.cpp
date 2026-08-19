@@ -195,6 +195,21 @@ int DomainDecomposition::targetRank(const std::array<double, 3> &pos) const {
   return coordinatesToRank(targetCoordinates);
 }
 
+void DomainDecomposition::setLocalBox(std::array<double, 3> localMin, std::array<double, 3> localMax) {
+  for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+    if (localMin[dimension] < _globalMin[dimension] or localMax[dimension] > _globalMax[dimension]) {
+      throw std::invalid_argument("DistributedAutoPas: local box must stay inside the global box.");
+    }
+
+    if (localMax[dimension] <= localMin[dimension]) {
+      throw std::invalid_argument("DistributedAutoPas: local box must have positive extent in every dimension.");
+    }
+  }
+
+  _localMin = localMin;
+  _localMax = localMax;
+}
+
 std::array<int, 3> DomainDecomposition::rankToCoordinates(int rank) const {
   if (rank < 0 or rank >= _numRanks) {
     throw std::invalid_argument("DistributedAutoPas: rank is outside the valid range.");
