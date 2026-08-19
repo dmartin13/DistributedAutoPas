@@ -293,6 +293,11 @@ add_dap_mpi_gtest(
 )
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
+    DistributedAutoPasTest.ResizesLocalBoxAndMigratesParticles
+    4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
     DistributedAutoPasTest.ReducesDoubleValuesGlobally
     4
 )

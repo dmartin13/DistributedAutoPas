@@ -200,6 +200,57 @@ TEST(DistributedAutoPasTest, UsesThreeDimensionalProcessGridForInitialOwnership)
   particles.finalize();
 }
 
+TEST(DistributedAutoPasTest, ResizesLocalBoxAndMigratesParticles) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 4);
+
+  dap::DistributedAutoPas<Particle> particles(runtime, globalMin, globalMax, cutoff, makeConfigurator());
+
+  particles.addParticlesFromRoot(std::vector<Particle>{
+      makeParticle(0, 0.9),
+      makeParticle(1, 1.1),
+      makeParticle(2, 1.5),
+      makeParticle(3, 2.5),
+      makeParticle(4, 3.5),
+  });
+
+  // Particle 0 leaves rank 0's old box but lies inside its expanded new box.
+  // This exercises emigrants returned by updateContainer() that become local again.
+  particles.applyToOwnedParticles([](auto &particle) {
+    if (particle.getID() == 0) {
+      particle.setR({1.1, 0.5, 0.5});
+    }
+  });
+
+  auto newLocalMin = particles.localBoxMin();
+  auto newLocalMax = particles.localBoxMax();
+  if (runtime.rank() == 0) {
+    newLocalMax[0] = 1.2;
+  } else if (runtime.rank() == 1) {
+    newLocalMin[0] = 1.2;
+  }
+
+  particles.prepareInteractions(newLocalMin, newLocalMax);
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 5);
+  EXPECT_EQ(particles.localBoxMin(), newLocalMin);
+  EXPECT_EQ(particles.localBoxMax(), newLocalMax);
+
+  if (runtime.rank() == 0) {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{0, 1}));
+  } else if (runtime.rank() == 1) {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{2}));
+  } else if (runtime.rank() == 2) {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{3}));
+  } else {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{4}));
+  }
+
+  particles.finalize();
+}
+
 TEST(DistributedAutoPasTest, ReducesDoubleValuesGlobally) {
   int argc = 0;
   char **argv = nullptr;

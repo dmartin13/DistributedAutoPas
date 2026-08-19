@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -253,6 +254,21 @@ class DistributedAutoPas {
   void prepareInteractions() { synchronizeParticles(); }
 
   /**
+   * Prepare the distributed particle state while applying updated local ownership bounds.
+   *
+   * This overload is the integration point for adaptive regular-grid load balancing. The
+   * node-local AutoPas container is updated using the old box first, then resized to the
+   * new box before all resulting emigrants are migrated with respect to the updated domain.
+   * Neighboring ranks must provide matching shared boundaries.
+   *
+   * @param localMin Updated lower corner of this rank's ownership box.
+   * @param localMax Updated upper corner of this rank's ownership box.
+   */
+  void prepareInteractions(const std::array<double, 3> &localMin, const std::array<double, 3> &localMax) {
+    synchronizeParticles(localMin, localMax);
+  }
+
+  /**
    * Execute an AutoPas functor on a particle state prepared by prepareInteractions().
    *
    * No migration or halo exchange is triggered here. This is useful when several
@@ -330,6 +346,27 @@ class DistributedAutoPas {
  private:
   void synchronizeParticles() {
     auto emigrants = _autoPas.updateContainer();
+    migrateAndExchangeHalos(std::move(emigrants));
+  }
+
+  void synchronizeParticles(const std::array<double, 3> &localMin, const std::array<double, 3> &localMax) {
+    auto emigrants = _autoPas.updateContainer();
+
+    // Validate the new geometry without changing the active decomposition yet.
+    // This keeps the domain and AutoPas box in sync if validation fails.
+    auto resizedDomain = _domain;
+    resizedDomain.setLocalBox(localMin, localMax);
+
+    auto additionalEmigrants = _autoPas.resizeBox(localMin, localMax);
+    emigrants.reserve(emigrants.size() + additionalEmigrants.size());
+    emigrants.insert(emigrants.end(), std::make_move_iterator(additionalEmigrants.begin()),
+                     std::make_move_iterator(additionalEmigrants.end()));
+
+    _domain = std::move(resizedDomain);
+    migrateAndExchangeHalos(std::move(emigrants));
+  }
+
+  void migrateAndExchangeHalos(std::vector<Particle> emigrants) {
     auto immigrants = _particleMigration.migrate(emigrants, _domain);
     _autoPas.addParticles(immigrants);
 
