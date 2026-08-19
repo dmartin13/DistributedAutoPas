@@ -53,6 +53,69 @@ TEST(CommunicationTest, ExchangesParticlesWithLeftAndRightNeighbors) {
   expectParticleEquals(received.recvFromRight.front(), 100 + right, 10. + right);
 }
 
+TEST(CommunicationTest, SupportsSplitBeginFinishNeighborExchange) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+
+  ASSERT_EQ(numberOfRanks, 4);
+
+  const int left = (rank - 1 + numberOfRanks) % numberOfRanks;
+  const int right = (rank + 1) % numberOfRanks;
+
+  const std::vector<Particle> sendLeft{makeParticle(500 + rank, 50. + rank)};
+  const std::vector<Particle> sendRight{makeParticle(600 + rank, 60. + rank)};
+
+  auto request = dap::beginLeftRightExchange(MPI_COMM_WORLD, left, right, sendLeft, sendRight, 1500);
+  EXPECT_TRUE(request.active());
+
+  // The split API deliberately leaves the payload exchange in flight here so
+  // useful work can be inserted between begin and finish in later algorithms.
+  const auto localWork = rank * rank;
+  EXPECT_GE(localWork, 0);
+
+  const auto received = dap::finishLeftRightExchange(request);
+  EXPECT_FALSE(request.active());
+
+  ASSERT_EQ(received.recvFromLeft.size(), 1);
+  ASSERT_EQ(received.recvFromRight.size(), 1);
+  expectParticleEquals(received.recvFromLeft.front(), 600 + left, 60. + left);
+  expectParticleEquals(received.recvFromRight.front(), 500 + right, 50. + right);
+
+  EXPECT_THROW((void)dap::finishLeftRightExchange(request), std::logic_error);
+}
+
+TEST(CommunicationTest, SplitExchangeSupportsMissingNeighbors) {
+  int rank = 0;
+  int numberOfRanks = 0;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numberOfRanks);
+
+  ASSERT_EQ(numberOfRanks, 4);
+
+  const int left = rank == 0 ? -1 : rank - 1;
+  const int right = rank == numberOfRanks - 1 ? -1 : rank + 1;
+
+  const std::vector<Particle> sendLeft{makeParticle(700 + rank, 70. + rank)};
+  const std::vector<Particle> sendRight{makeParticle(800 + rank, 80. + rank)};
+
+  auto request = dap::beginLeftRightExchange(MPI_COMM_WORLD, left, right, sendLeft, sendRight, 1750);
+  const auto received = dap::finishLeftRightExchange(request);
+
+  const std::size_t expectedFromLeft = left < 0 ? 0 : 1;
+  const std::size_t expectedFromRight = right < 0 ? 0 : 1;
+  ASSERT_EQ(received.recvFromLeft.size(), expectedFromLeft);
+  ASSERT_EQ(received.recvFromRight.size(), expectedFromRight);
+
+  if (left >= 0) {
+    expectParticleEquals(received.recvFromLeft.front(), 800 + left, 80. + left);
+  }
+  if (right >= 0) {
+    expectParticleEquals(received.recvFromRight.front(), 700 + right, 70. + right);
+  }
+}
+
 TEST(CommunicationTest, SupportsEmptyNeighborBuffers) {
   int rank = 0;
   int numberOfRanks = 0;

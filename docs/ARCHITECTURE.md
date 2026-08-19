@@ -70,6 +70,15 @@ A future backend design may separate control communication from particle data
 transport, e.g. MPI for process/topology control and CUDA-aware MPI, NCCL, or
 NVSHMEM for GPU-resident particle data.
 
+The direct-neighbor particle transport now also provides a split-phase
+`beginLeftRightExchange()` / `finishLeftRightExchange()` API. The begin phase performs
+a small count handshake to size receive buffers and then posts the particle payload
+with `MPI_Irecv` / `MPI_Isend`. The payload can remain in flight while the caller does
+independent work. The existing `exchangeLeftRight()` operation retains its original blocking
+`MPI_Sendrecv` implementation and is still used by migration and halo exchange at
+this stage. This intentionally separates introducing non-blocking transport from
+changing the distributed algorithms to exploit overlap.
+
 ## Particle-local reductions
 
 Simulator components such as the thermostat express local reductions through
@@ -90,6 +99,7 @@ physical quantity that should be accumulated or written.
 - the bundled md-flexible example forwards its `boundary-type` and `subdivide-dimension` settings to DistributedAutoPas
 - no distributed load balancing
 - halo exchange currently uses the cutoff width only
+- direct-neighbor transport has a non-blocking split-phase payload API, while timestep migration and halo exchange still use the original blocking `MPI_Sendrecv` reference path and therefore do not overlap communication with computation yet
 - MPI is the only communication backend
 
 ## Bundled example application

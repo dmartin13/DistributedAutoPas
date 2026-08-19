@@ -63,6 +63,16 @@ add_dap_mpi_gtest(
 )
 add_dap_mpi_gtest(
     distributed_autopas_communication_tests
+    CommunicationTest.SupportsSplitBeginFinishNeighborExchange
+    4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_communication_tests
+    CommunicationTest.SplitExchangeSupportsMissingNeighbors
+    4
+)
+add_dap_mpi_gtest(
+    distributed_autopas_communication_tests
     CommunicationTest.SupportsEmptyNeighborBuffers
     4
 )

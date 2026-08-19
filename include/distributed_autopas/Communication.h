@@ -2,9 +2,11 @@
 
 #include <mpi.h>
 
+#include <array>
 #include <cstddef>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "distributed_autopas/ParticleSerialization.h"
@@ -17,11 +19,190 @@ struct LeftRightExchange {
   std::vector<Particle> recvFromRight;
 };
 
+namespace detail {
+
+template <class Particle, class Serializer>
+std::vector<typename Serializer::Message> packParticles(const std::vector<Particle> &particles) {
+  std::vector<typename Serializer::Message> messages;
+  messages.reserve(particles.size());
+  for (const auto &particle : particles) {
+    messages.push_back(Serializer::pack(particle));
+  }
+  return messages;
+}
+
+template <class Particle, class Serializer>
+std::vector<Particle> unpackParticles(const std::vector<typename Serializer::Message> &messages) {
+  std::vector<Particle> particles;
+  particles.reserve(messages.size());
+  for (const auto &message : messages) {
+    particles.push_back(Serializer::unpack(message));
+  }
+  return particles;
+}
+
+inline int toMpiNeighbor(int rank) { return rank < 0 ? MPI_PROC_NULL : rank; }
+
+}  // namespace detail
+
 /**
- * Exchange particles with the direct left and right neighbors.
+ * Handle for an in-flight direct-neighbor particle exchange.
  *
- * Serialization is delegated to ParticleSerializer<Particle>. This keeps the distributed layer
- * independent of the concrete particle representation used by an application.
+ * The request owns all serialized send and receive buffers until the posted MPI
+ * operations have completed. This is important because MPI_Isend may keep using
+ * the send buffers after beginLeftRightExchange() returns.
+ *
+ * Requests are move-only. Normally they are completed explicitly with
+ * finishLeftRightExchange(). The destructor waits for outstanding operations as
+ * a safety net so that communication buffers are never destroyed while MPI may
+ * still access them.
+ */
+template <class Particle, class Serializer = ParticleSerializer<Particle>>
+class LeftRightExchangeRequest {
+ public:
+  using Message = typename Serializer::Message;
+
+  LeftRightExchangeRequest(const LeftRightExchangeRequest &) = delete;
+  LeftRightExchangeRequest &operator=(const LeftRightExchangeRequest &) = delete;
+  LeftRightExchangeRequest &operator=(LeftRightExchangeRequest &&) = delete;
+
+  LeftRightExchangeRequest(LeftRightExchangeRequest &&other) noexcept
+      : _sendLeftMessages(std::move(other._sendLeftMessages)),
+        _sendRightMessages(std::move(other._sendRightMessages)),
+        _recvFromLeftMessages(std::move(other._recvFromLeftMessages)),
+        _recvFromRightMessages(std::move(other._recvFromRightMessages)),
+        _requests(other._requests),
+        _active(other._active) {
+    other._requests.fill(MPI_REQUEST_NULL);
+    other._active = false;
+  }
+
+  ~LeftRightExchangeRequest() { waitForCompletion(); }
+
+  [[nodiscard]] bool active() const noexcept { return _active; }
+
+ private:
+  LeftRightExchangeRequest(std::vector<Message> sendLeftMessages, std::vector<Message> sendRightMessages,
+                           std::vector<Message> recvFromLeftMessages, std::vector<Message> recvFromRightMessages,
+                           std::array<MPI_Request, 4> requests)
+      : _sendLeftMessages(std::move(sendLeftMessages)),
+        _sendRightMessages(std::move(sendRightMessages)),
+        _recvFromLeftMessages(std::move(recvFromLeftMessages)),
+        _recvFromRightMessages(std::move(recvFromRightMessages)),
+        _requests(requests),
+        _active(true) {}
+
+  void waitForCompletion() {
+    if (not _active) {
+      return;
+    }
+
+    MPI_Waitall(static_cast<int>(_requests.size()), _requests.data(), MPI_STATUSES_IGNORE);
+    _active = false;
+  }
+
+  std::vector<Message> _sendLeftMessages;
+  std::vector<Message> _sendRightMessages;
+  std::vector<Message> _recvFromLeftMessages;
+  std::vector<Message> _recvFromRightMessages;
+  std::array<MPI_Request, 4> _requests{};
+  bool _active{false};
+
+  template <class P, class S>
+  friend LeftRightExchangeRequest<P, S> beginLeftRightExchange(MPI_Comm, int, int, const std::vector<P> &,
+                                                               const std::vector<P> &, int);
+
+  template <class P, class S>
+  friend LeftRightExchange<P> finishLeftRightExchange(LeftRightExchangeRequest<P, S> &);
+};
+
+/**
+ * Begin a particle exchange with the direct left and right neighbors.
+ *
+ * A short count handshake is completed first because the receive buffer sizes
+ * must be known before posting the payload receives. The particle payload is
+ * then transferred with MPI_Irecv / MPI_Isend and remains in flight when this
+ * function returns. This creates the split phase needed for later overlap with
+ * useful computation without changing migration or halo-exchange semantics yet.
+ *
+ * Serialization is delegated to ParticleSerializer<Particle>. This keeps the
+ * distributed layer independent of the concrete particle representation used by
+ * an application.
+ */
+template <class Particle, class Serializer = ParticleSerializer<Particle>>
+LeftRightExchangeRequest<Particle, Serializer> beginLeftRightExchange(MPI_Comm comm, int left, int right,
+                                                                      const std::vector<Particle> &sendLeft,
+                                                                      const std::vector<Particle> &sendRight, int tag) {
+  using Message = typename Serializer::Message;
+  static_assert(std::is_trivially_copyable_v<Message>,
+                "ParticleSerializer::Message must be trivially copyable for MPI_BYTE communication.");
+
+  auto sendLeftMessages = detail::packParticles<Particle, Serializer>(sendLeft);
+  auto sendRightMessages = detail::packParticles<Particle, Serializer>(sendRight);
+
+  const int sendLeftCount = static_cast<int>(sendLeftMessages.size());
+  const int sendRightCount = static_cast<int>(sendRightMessages.size());
+
+  // The domain decomposition uses negative ranks to represent a missing neighbor
+  // at a non-periodic global boundary. Translate that backend-independent sentinel
+  // to MPI_PROC_NULL here so callers do not need MPI-specific boundary handling.
+  const int mpiLeft = detail::toMpiNeighbor(left);
+  const int mpiRight = detail::toMpiNeighbor(right);
+
+  int recvFromLeftCount = 0;
+  int recvFromRightCount = 0;
+
+  // The count handshake is tiny but must finish before receive payload buffers can
+  // be allocated. The potentially large particle payload is what remains in flight
+  // after beginLeftRightExchange() returns.
+  std::array<MPI_Request, 4> countRequests{};
+  MPI_Irecv(&recvFromRightCount, 1, MPI_INT, mpiRight, tag, comm, &countRequests[0]);
+  MPI_Irecv(&recvFromLeftCount, 1, MPI_INT, mpiLeft, tag + 1, comm, &countRequests[1]);
+  MPI_Isend(&sendLeftCount, 1, MPI_INT, mpiLeft, tag, comm, &countRequests[2]);
+  MPI_Isend(&sendRightCount, 1, MPI_INT, mpiRight, tag + 1, comm, &countRequests[3]);
+  MPI_Waitall(static_cast<int>(countRequests.size()), countRequests.data(), MPI_STATUSES_IGNORE);
+
+  std::vector<Message> recvFromLeftMessages(recvFromLeftCount);
+  std::vector<Message> recvFromRightMessages(recvFromRightCount);
+
+  std::array<MPI_Request, 4> payloadRequests{};
+  MPI_Irecv(recvFromRightMessages.data(), recvFromRightCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiRight,
+            tag + 2, comm, &payloadRequests[0]);
+  MPI_Irecv(recvFromLeftMessages.data(), recvFromLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiLeft,
+            tag + 3, comm, &payloadRequests[1]);
+  MPI_Isend(sendLeftMessages.data(), sendLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiLeft, tag + 2,
+            comm, &payloadRequests[2]);
+  MPI_Isend(sendRightMessages.data(), sendRightCount * static_cast<int>(sizeof(Message)), MPI_BYTE, mpiRight, tag + 3,
+            comm, &payloadRequests[3]);
+
+  return LeftRightExchangeRequest<Particle, Serializer>{std::move(sendLeftMessages), std::move(sendRightMessages),
+                                                        std::move(recvFromLeftMessages),
+                                                        std::move(recvFromRightMessages), payloadRequests};
+}
+
+/**
+ * Complete an exchange started with beginLeftRightExchange() and deserialize the
+ * received particles.
+ */
+template <class Particle, class Serializer = ParticleSerializer<Particle>>
+LeftRightExchange<Particle> finishLeftRightExchange(LeftRightExchangeRequest<Particle, Serializer> &request) {
+  if (not request._active) {
+    throw std::logic_error("finishLeftRightExchange(): request has already been completed.");
+  }
+
+  request.waitForCompletion();
+
+  return LeftRightExchange<Particle>{detail::unpackParticles<Particle, Serializer>(request._recvFromLeftMessages),
+                                     detail::unpackParticles<Particle, Serializer>(request._recvFromRightMessages)};
+}
+
+/**
+ * Blocking reference exchange with the direct left and right neighbors.
+ *
+ * This intentionally retains the previous MPI_Sendrecv implementation. Migration
+ * and halo exchange continue to use this path for now. Keeping the blocking path
+ * unchanged gives us a clean reference implementation while the split-phase API
+ * is introduced and tested independently.
  */
 template <class Particle, class Serializer = ParticleSerializer<Particle>>
 LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right, const std::vector<Particle> &sendLeft,
@@ -30,35 +211,14 @@ LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right
   static_assert(std::is_trivially_copyable_v<Message>,
                 "ParticleSerializer::Message must be trivially copyable for MPI_BYTE communication.");
 
-  const auto packParticles = [](const std::vector<Particle> &particles) {
-    std::vector<Message> messages;
-    messages.reserve(particles.size());
-    for (const auto &particle : particles) {
-      messages.push_back(Serializer::pack(particle));
-    }
-    return messages;
-  };
-
-  const auto unpackParticles = [](const std::vector<Message> &messages) {
-    std::vector<Particle> particles;
-    particles.reserve(messages.size());
-    for (const auto &message : messages) {
-      particles.push_back(Serializer::unpack(message));
-    }
-    return particles;
-  };
-
-  const auto sendLeftMessages = packParticles(sendLeft);
-  const auto sendRightMessages = packParticles(sendRight);
+  const auto sendLeftMessages = detail::packParticles<Particle, Serializer>(sendLeft);
+  const auto sendRightMessages = detail::packParticles<Particle, Serializer>(sendRight);
 
   const int sendLeftCount = static_cast<int>(sendLeftMessages.size());
   const int sendRightCount = static_cast<int>(sendRightMessages.size());
 
-  // The domain decomposition uses negative ranks to represent a missing neighbor
-  // at a non-periodic global boundary. Translate that backend-independent sentinel
-  // to MPI_PROC_NULL here so callers do not need MPI-specific boundary handling.
-  const int mpiLeft = left < 0 ? MPI_PROC_NULL : left;
-  const int mpiRight = right < 0 ? MPI_PROC_NULL : right;
+  const int mpiLeft = detail::toMpiNeighbor(left);
+  const int mpiRight = detail::toMpiNeighbor(right);
 
   int recvFromLeftCount = 0;
   int recvFromRightCount = 0;
@@ -80,7 +240,8 @@ LeftRightExchange<Particle> exchangeLeftRight(MPI_Comm comm, int left, int right
                tag + 3, recvFromLeftMessages.data(), recvFromLeftCount * static_cast<int>(sizeof(Message)), MPI_BYTE,
                mpiLeft, tag + 3, comm, MPI_STATUS_IGNORE);
 
-  return LeftRightExchange<Particle>{unpackParticles(recvFromLeftMessages), unpackParticles(recvFromRightMessages)};
+  return LeftRightExchange<Particle>{detail::unpackParticles<Particle, Serializer>(recvFromLeftMessages),
+                                     detail::unpackParticles<Particle, Serializer>(recvFromRightMessages)};
 }
 
 /**
