@@ -1,6 +1,7 @@
 add_executable(
     distributed_autopas_tests
     DomainDecompositionTest.cpp
+    InvertedPressureTest.cpp
     ReflectiveBoundaryTest.cpp
 )
 
