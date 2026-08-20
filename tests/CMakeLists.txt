@@ -41,6 +41,34 @@ function(add_dap_mpi_gtest target test_name number_of_ranks)
     set_tests_properties("DistributedAutoPas/${test_name}" PROPERTIES PROCESSORS ${number_of_ranks})
 endfunction()
 
+
+add_executable(
+    distributed_autopas_load_balancing_tests
+    InvertedPressureLoadBalancerTest.cpp
+    MPITestMain.cpp
+)
+
+target_link_libraries(
+    distributed_autopas_load_balancing_tests
+    PRIVATE
+        distributed_autopas
+        GTest::gtest
+        MPI::MPI_CXX
+)
+
+target_compile_features(distributed_autopas_load_balancing_tests PRIVATE cxx_std_20)
+
+add_dap_mpi_gtest(
+    distributed_autopas_load_balancing_tests
+    InvertedPressureLoadBalancerTest.AveragesWorkAcrossPlanesAndMovesSharedBoundaryConsistently
+    8
+)
+add_dap_mpi_gtest(
+    distributed_autopas_load_balancing_tests
+    InvertedPressureLoadBalancerTest.EnforcesMinimumWidthBeforeApplyingDampedShift
+    2
+)
+
 add_executable(
     distributed_autopas_communication_tests
     CommunicationTest.cpp
