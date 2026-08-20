@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -18,6 +19,7 @@
 #include "distributed_autopas/ParticleMigration.h"
 #include "distributed_autopas/ParticleSerialization.h"
 #include "distributed_autopas/Runtime.h"
+#include "distributed_autopas/load_balancing/InvertedPressureLoadBalancer.h"
 
 namespace dap {
 
@@ -254,6 +256,19 @@ class DistributedAutoPas {
   void prepareInteractions() { synchronizeParticles(); }
 
   /**
+   * Prepare the distributed particle state and update the local ownership bounds using
+   * inverted-pressure load balancing.
+   *
+   * The work value is the application-provided computational load measured for this rank.
+   * All ranks must call this overload together. The minimum subdomain width is derived from
+   * the node-local AutoPas halo width in the same way as md-flexible:
+   * 2 * (cutoff + Verlet skin).
+   *
+   * @param localWork Computational work measured on this MPI rank.
+   */
+  void prepareInteractions(double localWork) { synchronizeParticlesWithLoadBalancing(localWork); }
+
+  /**
    * Prepare the distributed particle state while applying updated local ownership bounds.
    *
    * This overload is the integration point for adaptive regular-grid load balancing. The
@@ -351,7 +366,30 @@ class DistributedAutoPas {
 
   void synchronizeParticles(const std::array<double, 3> &localMin, const std::array<double, 3> &localMax) {
     auto emigrants = _autoPas.updateContainer();
+    resizeDomainAndMigrate(std::move(emigrants), localMin, localMax);
+  }
 
+  void synchronizeParticlesWithLoadBalancing(double localWork) {
+    auto emigrants = _autoPas.updateContainer();
+
+    // There is no distributed geometry to balance with a single rank. Avoid creating
+    // unnecessary plane communicators and keep the ordinary synchronization path.
+    if (_runtime.size() == 1) {
+      migrateAndExchangeHalos(std::move(emigrants));
+      return;
+    }
+
+    if (not _invertedPressureLoadBalancer.has_value()) {
+      _invertedPressureLoadBalancer.emplace(_runtime.communicator(), _domain);
+    }
+
+    const double minWidth = 2. * (_cutoff + _autoPas.getVerletSkin());
+    const auto balancedBox = _invertedPressureLoadBalancer->balance(localWork, _domain, minWidth);
+    resizeDomainAndMigrate(std::move(emigrants), balancedBox.min, balancedBox.max);
+  }
+
+  void resizeDomainAndMigrate(std::vector<Particle> emigrants, const std::array<double, 3> &localMin,
+                              const std::array<double, 3> &localMax) {
     // Validate the new geometry without changing the active decomposition yet.
     // This keeps the domain and AutoPas box in sync if validation fails.
     auto resizedDomain = _domain;
@@ -385,6 +423,7 @@ class DistributedAutoPas {
   DomainDecomposition _domain;
   ParticleMigration<Particle, Serializer> _particleMigration;
   HaloExchange<Particle, Serializer> _haloExchange;
+  std::optional<load_balancing::InvertedPressureLoadBalancer> _invertedPressureLoadBalancer;
   autopas::AutoPas<Particle> _autoPas;
   double _cutoff;
 };

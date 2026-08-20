@@ -251,6 +251,91 @@ TEST(DistributedAutoPasTest, ResizesLocalBoxAndMigratesParticles) {
   particles.finalize();
 }
 
+TEST(DistributedAutoPasTest, AppliesInvertedPressureLoadBalancingAndMigratesParticles) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 2);
+
+  dap::DistributedAutoPas<Particle> particles(runtime, globalMin, globalMax, cutoff, makeConfigurator());
+
+  particles.addParticlesFromRoot(std::vector<Particle>{
+      makeParticle(0, 0.5),
+      makeParticle(1, 1.75),
+      makeParticle(2, 2.25),
+      makeParticle(3, 3.5),
+  });
+
+  // Rank 0 reports three times as much work as rank 1. The theoretically balanced
+  // shared boundary is x=1.0 and the damped inverted-pressure step moves it from
+  // x=2.0 to x=1.5. Particle 1 must therefore migrate from rank 0 to rank 1.
+  const double localWork = runtime.rank() == 0 ? 3. : 1.;
+  particles.prepareInteractions(localWork);
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 4);
+  if (runtime.rank() == 0) {
+    EXPECT_DOUBLE_EQ(particles.localBoxMin()[0], 0.);
+    EXPECT_DOUBLE_EQ(particles.localBoxMax()[0], 1.5);
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{0}));
+  } else {
+    EXPECT_DOUBLE_EQ(particles.localBoxMin()[0], 1.5);
+    EXPECT_DOUBLE_EQ(particles.localBoxMax()[0], 4.);
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{1, 2, 3}));
+  }
+
+  particles.finalize();
+}
+
+TEST(DistributedAutoPasTest, AppliesRepeatedInvertedPressureLoadBalancingFromCurrentDomain) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 2);
+
+  dap::DistributedAutoPas<Particle> particles(runtime, globalMin, globalMax, cutoff, makeConfigurator());
+
+  particles.addParticlesFromRoot(std::vector<Particle>{
+      makeParticle(0, 0.5),
+      makeParticle(1, 1.4),
+      makeParticle(2, 1.75),
+      makeParticle(3, 2.25),
+      makeParticle(4, 3.5),
+  });
+
+  const double localWork = runtime.rank() == 0 ? 3. : 1.;
+
+  // The first balancing step moves the shared boundary from x=2.0 to x=1.5.
+  // Particle 2 therefore migrates from rank 0 to rank 1.
+  particles.prepareInteractions(localWork);
+
+  if (runtime.rank() == 0) {
+    EXPECT_DOUBLE_EQ(particles.localBoxMax()[0], 1.5);
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{0, 1}));
+  } else {
+    EXPECT_DOUBLE_EQ(particles.localBoxMin()[0], 1.5);
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{2, 3, 4}));
+  }
+
+  // With the same work imbalance, the theoretical boundary is still x=1.0.
+  // The second damped update must start from the current x=1.5 boundary and
+  // therefore move it to x=1.25, rather than restarting from the initial grid.
+  // Particle 1 then migrates during this second balancing step.
+  particles.prepareInteractions(localWork);
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 5);
+  if (runtime.rank() == 0) {
+    EXPECT_DOUBLE_EQ(particles.localBoxMin()[0], 0.);
+    EXPECT_DOUBLE_EQ(particles.localBoxMax()[0], 1.25);
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{0}));
+  } else {
+    EXPECT_DOUBLE_EQ(particles.localBoxMin()[0], 1.25);
+    EXPECT_DOUBLE_EQ(particles.localBoxMax()[0], 4.);
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{1, 2, 3, 4}));
+  }
+
+  particles.finalize();
+}
+
 TEST(DistributedAutoPasTest, ReducesDoubleValuesGlobally) {
   int argc = 0;
   char **argv = nullptr;
