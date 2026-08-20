@@ -1,0 +1,196 @@
+# Adaptive 3D regression shared by original md-flexible and DistributedAutoPas.
+#
+# Run both executables with 8 MPI ranks via scripts/run_load_balancing_regression.py.
+# The deliberately dense lower-octant block makes the initial 2 x 2 x 2 grid
+# strongly imbalanced, so Inverted Pressure should move at least one boundary.
+#
+# The particle pairs deliberately exercise:
+# - internal x, y, and z face boundaries
+# - an internal xy edge
+# - an internal xyz corner
+# - periodic x, y, and z boundaries
+# - the periodic xyz corner
+#
+# The explicitly chosen [0, 8]^3 periodic box is shared by both runs. The
+# additional dense block is confined to the initial lower x/y/z process planes.
+
+container: [DirectSum]
+traversal: [ds_sequential]
+data-layout: [AoS]
+newton3: [enabled]
+functor: lennard-jones
+
+cutoff: 1.5
+verlet-skin-radius: 0.0
+tuning-strategies: []
+tuning-phases: 0
+
+box-min: [0.0, 0.0, 0.0]
+box-max: [8.0, 8.0, 8.0]
+
+deltaT: 1.0e-12
+iterations: 3
+
+boundary-type: [periodic, periodic, periodic]
+subdivide-dimension: [true, true, true]
+load-balancer: InvertedPressure
+load-balancing-interval: 1
+
+vtk-filename: dapLoadBalancingCompare
+vtk-output-folder: output
+vtk-write-frequency: 1
+no-progress-bar: true
+no-end-config: true
+
+Sites:
+  0:
+    epsilon: 1.0
+    sigma: 1.0
+    mass: 1.0
+
+Objects:
+  # Internal x face at x = 4.
+  CubeGrid:
+    0:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [3.5, 1.0, 1.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    1:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [4.5, 1.0, 1.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Internal y face at y = 4.
+  CubeGrid:
+    2:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [1.0, 3.5, 3.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    3:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [1.0, 4.5, 3.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Internal z face at z = 4.
+  CubeGrid:
+    4:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [3.0, 1.0, 3.5]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    5:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [3.0, 1.0, 4.5]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Internal xy edge.
+  CubeGrid:
+    6:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [3.6, 3.6, 6.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    7:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [4.4, 4.4, 6.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Internal xyz corner.
+  CubeGrid:
+    8:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [3.6, 3.6, 3.6]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    9:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [4.4, 4.4, 4.4]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Periodic x boundary.
+  CubeGrid:
+    10:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [0.4, 6.5, 1.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    11:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [7.6, 6.5, 1.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Periodic y boundary.
+  CubeGrid:
+    12:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [6.5, 0.4, 3.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    13:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [6.5, 7.6, 3.0]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Periodic z boundary.
+  CubeGrid:
+    14:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [2.5, 6.0, 0.4]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    15:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [2.5, 6.0, 7.6]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Periodic xyz corner.
+  CubeGrid:
+    16:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [0.4, 0.4, 0.4]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+    17:
+      particles-per-dimension: [1, 1, 1]
+      particle-spacing: 0.2
+      bottomLeftCorner: [7.6, 7.6, 7.6]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
+
+  # Deliberate load imbalance: all 216 particles start in the lower x/y/z
+  # process planes. The tiny time step keeps the physical state effectively
+  # unchanged while still enabling md-flexible's load-balancing path.
+  CubeGrid:
+    18:
+      particles-per-dimension: [6, 6, 6]
+      particle-spacing: 0.5
+      bottomLeftCorner: [0.75, 0.75, 0.75]
+      velocity: [0.0, 0.0, 0.0]
+      particle-type-id: 0
