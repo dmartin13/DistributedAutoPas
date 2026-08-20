@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <iterator>
 #include <optional>
@@ -58,16 +59,19 @@ class DistributedAutoPas {
    * This overload keeps the legacy x-periodic decomposition for backwards compatibility.
    */
   template <class Configurator>
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff, Configurator &&configurator)
+  requires std::invocable < Configurator, autopas::AutoPas<Particle>
+  & > DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                         const std::array<double, 3> &globalMax, double cutoff, Configurator &&configurator)
       : DistributedAutoPas(runtime, globalMin, globalMax, cutoff, std::array<bool, 3>{true, false, false},
                            std::array<BoundaryType, 3>{BoundaryType::periodic, BoundaryType::none, BoundaryType::none},
                            std::forward<Configurator>(configurator)) {}
 
   /** Construct and configure a distributed container with a Cartesian process grid. */
   template <class Configurator>
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff, const std::array<bool, 3> &subdivideDimensions, Configurator &&configurator)
+  requires std::invocable < Configurator, autopas::AutoPas<Particle>
+  & > DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                         const std::array<double, 3> &globalMax, double cutoff,
+                         const std::array<bool, 3> &subdivideDimensions, Configurator &&configurator)
       : DistributedAutoPas(
             runtime, globalMin, globalMax, cutoff, subdivideDimensions,
             std::array<BoundaryType, 3>{BoundaryType::periodic, BoundaryType::periodic, BoundaryType::periodic},
@@ -83,14 +87,14 @@ class DistributedAutoPas {
    * applied by DistributedAutoPas.
    */
   template <class Configurator>
-  DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin, const std::array<double, 3> &globalMax,
-                     double cutoff, const std::array<bool, 3> &subdivideDimensions,
-                     const std::array<BoundaryType, 3> &boundaryTypes, Configurator &&configurator)
+  requires std::invocable < Configurator, autopas::AutoPas<Particle>
+  & > DistributedAutoPas(Runtime &runtime, const std::array<double, 3> &globalMin,
+                         const std::array<double, 3> &globalMax, double cutoff,
+                         const std::array<bool, 3> &subdivideDimensions,
+                         const std::array<BoundaryType, 3> &boundaryTypes, Configurator &&configurator)
       : _runtime(runtime),
-        _domain(runtime.rank(), runtime.size(), globalMin, globalMax, subdivideDimensions, boundaryTypes),
-        _particleMigration(runtime.communicator()),
-        _haloExchange(runtime.communicator()),
-        _cutoff(cutoff) {
+  _domain(runtime.rank(), runtime.size(), globalMin, globalMax, subdivideDimensions, boundaryTypes),
+  _particleMigration(runtime.communicator()), _haloExchange(runtime.communicator()), _cutoff(cutoff) {
     _autoPas.setBoxMin(_domain.localMin());
     _autoPas.setBoxMax(_domain.localMax());
     _autoPas.setCutoff(_cutoff);
