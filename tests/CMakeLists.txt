@@ -332,8 +332,18 @@ add_dap_mpi_gtest(
 )
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests
+    DistributedAutoPasTest.RedistributesParticlesUsingAdaptiveTargetRanks
+    2
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
     DistributedAutoPasTest.AppliesRepeatedInvertedPressureLoadBalancingFromCurrentDomain
     2
+)
+add_dap_mpi_gtest(
+    distributed_autopas_public_api_tests
+    DistributedAutoPasTest.BalancesMigratesAndComputesAcrossAdaptiveThreeDimensionalCorner
+    8
 )
 add_dap_mpi_gtest(
     distributed_autopas_public_api_tests

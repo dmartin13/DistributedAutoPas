@@ -5,6 +5,7 @@
  */
 
 #include <fstream>
+#include <stdexcept>
 
 #include "Simulation.h"
 #include "distributed_autopas/Runtime.h"
@@ -23,10 +24,16 @@ int main(int argc, char **argv) {
   {
     MDFlexConfig configuration(argc, argv, runtime.isRoot());
 
-    // DistributedAutoPas now supports static Cartesian decompositions selected
-    // through md-flexible's subdivide-dimension option. Distributed load balancing
-    // is not implemented yet, so keep that feature disabled explicitly.
-    configuration.loadBalancer.value = LoadBalancerOption::none;
+    // DistributedAutoPas currently supports md-flexible's InvertedPressure load balancer.
+    // ALL requires a different migration strategy and is intentionally not supported yet.
+    if (configuration.loadBalancer.value == LoadBalancerOption::all) {
+      throw std::runtime_error(
+          "DistributedAutoPas does not support the ALL load balancer yet. Use InvertedPressure or None.");
+    }
+    if (configuration.loadBalancer.value == LoadBalancerOption::invertedPressure and
+        configuration.loadBalancingInterval.value == 0) {
+      throw std::runtime_error("Load balancing interval must be greater than zero.");
+    }
 
     if (not configuration.checkpointfile.value.empty()) {
       configuration.flushParticles();

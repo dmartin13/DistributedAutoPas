@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace dap {
@@ -75,10 +77,16 @@ DomainDecomposition::DomainDecomposition(int rank, int numRanks, std::array<doub
     const double globalLength = _globalMax[dimension] - _globalMin[dimension];
     const double localLength = globalLength / static_cast<double>(_processGrid[dimension]);
 
-    _localMin[dimension] = _globalMin[dimension] + static_cast<double>(_coordinates[dimension]) * localLength;
-    _localMax[dimension] = _coordinates[dimension] == _processGrid[dimension] - 1
-                               ? _globalMax[dimension]
-                               : _globalMin[dimension] + static_cast<double>(_coordinates[dimension] + 1) * localLength;
+    auto &boundaries = _subdomainBoundaries[dimension];
+    boundaries.resize(static_cast<std::size_t>(_processGrid[dimension] + 1));
+    for (int coordinate = 0; coordinate <= _processGrid[dimension]; ++coordinate) {
+      boundaries[static_cast<std::size_t>(coordinate)] =
+          coordinate == _processGrid[dimension] ? _globalMax[dimension]
+                                                : _globalMin[dimension] + static_cast<double>(coordinate) * localLength;
+    }
+
+    _localMin[dimension] = boundaries[static_cast<std::size_t>(_coordinates[dimension])];
+    _localMax[dimension] = boundaries[static_cast<std::size_t>(_coordinates[dimension] + 1)];
   }
 }
 
@@ -184,10 +192,9 @@ int DomainDecomposition::targetRank(const std::array<double, 3> &pos) const {
   std::array<int, 3> targetCoordinates{};
 
   for (std::size_t dimension = 0; dimension < 3; ++dimension) {
-    const double globalLength = _globalMax[dimension] - _globalMin[dimension];
-    const double relativePosition = (pos[dimension] - _globalMin[dimension]) / globalLength;
-
-    int coordinate = static_cast<int>(relativePosition * _processGrid[dimension]);
+    const auto &boundaries = _subdomainBoundaries[dimension];
+    const auto upperBoundary = std::upper_bound(boundaries.begin(), boundaries.end(), pos[dimension]);
+    int coordinate = static_cast<int>(std::distance(boundaries.begin(), upperBoundary)) - 1;
     coordinate = std::clamp(coordinate, 0, _processGrid[dimension] - 1);
     targetCoordinates[dimension] = coordinate;
   }
@@ -195,19 +202,31 @@ int DomainDecomposition::targetRank(const std::array<double, 3> &pos) const {
   return coordinatesToRank(targetCoordinates);
 }
 
-void DomainDecomposition::setLocalBox(std::array<double, 3> localMin, std::array<double, 3> localMax) {
+void DomainDecomposition::setSubdomainBoundaries(std::array<std::vector<double>, 3> boundaries) {
   for (std::size_t dimension = 0; dimension < 3; ++dimension) {
-    if (localMin[dimension] < _globalMin[dimension] or localMax[dimension] > _globalMax[dimension]) {
-      throw std::invalid_argument("DistributedAutoPas: local box must stay inside the global box.");
+    const auto expectedSize = static_cast<std::size_t>(_processGrid[dimension] + 1);
+    if (boundaries[dimension].size() != expectedSize) {
+      throw std::invalid_argument(
+          "DistributedAutoPas: number of subdomain boundaries must match the process-grid dimension.");
     }
 
-    if (localMax[dimension] <= localMin[dimension]) {
-      throw std::invalid_argument("DistributedAutoPas: local box must have positive extent in every dimension.");
+    if (boundaries[dimension].front() != _globalMin[dimension] or
+        boundaries[dimension].back() != _globalMax[dimension]) {
+      throw std::invalid_argument("DistributedAutoPas: subdomain boundaries must span the complete global box.");
+    }
+
+    for (std::size_t boundary = 1; boundary < boundaries[dimension].size(); ++boundary) {
+      if (boundaries[dimension][boundary] <= boundaries[dimension][boundary - 1]) {
+        throw std::invalid_argument("DistributedAutoPas: subdomain boundaries must be strictly increasing.");
+      }
     }
   }
 
-  _localMin = localMin;
-  _localMax = localMax;
+  _subdomainBoundaries = std::move(boundaries);
+  for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+    _localMin[dimension] = _subdomainBoundaries[dimension][static_cast<std::size_t>(_coordinates[dimension])];
+    _localMax[dimension] = _subdomainBoundaries[dimension][static_cast<std::size_t>(_coordinates[dimension] + 1)];
+  }
 }
 
 std::array<int, 3> DomainDecomposition::rankToCoordinates(int rank) const {

@@ -269,15 +269,30 @@ void Simulation::run() {
 #endif
     }
 
-    // Prepare the distributed particle state once for all interaction functors in this
-    // iteration. This keeps migration and halo exchange inside DistributedAutoPas while
-    // leaving application-specific boundary physics in md-flexible.
-    _distributedAutoPasContainer->prepareInteractions();
+    // Match md-flexible's adaptive-grid cadence. The application measures the local
+    // computational work before distributed synchronization and only requests a balancing
+    // step at the configured interval. DistributedAutoPas owns the actual geometry update,
+    // resize, migration, and halo exchange.
+    const bool shouldLoadBalance = _configuration.loadBalancer.value == LoadBalancerOption::invertedPressure and
+                                   _configuration.deltaT.value != 0 and not _simulationIsPaused and
+                                   _iteration % _configuration.loadBalancingInterval.value == 0;
+
+    if (shouldLoadBalance) {
+      const auto computationalLoad = static_cast<double>(_timers.computationalLoad.stop());
+      _distributedAutoPasContainer->prepareInteractions(computationalLoad);
+    } else {
+      _distributedAutoPasContainer->prepareInteractions();
+    }
 
     _timers.reflectParticlesAtBoundaries.start();
     ReflectiveBoundary::apply(*_distributedAutoPasContainer, *_configuration.getParticlePropertiesLibrary(),
                               maximumSigma);
     _timers.reflectParticlesAtBoundaries.stop();
+
+    if (shouldLoadBalance) {
+      // Continue measuring application-side computation after the communication phase.
+      _timers.computationalLoad.start();
+    }
 
     updateInteractionForces();
 

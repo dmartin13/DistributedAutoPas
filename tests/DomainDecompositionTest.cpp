@@ -2,6 +2,7 @@
 
 #include <array>
 #include <stdexcept>
+#include <vector>
 
 #include "distributed_autopas/DomainDecomposition.h"
 
@@ -92,25 +93,62 @@ TEST(DomainDecompositionTest, DeterminesTargetRankInThreeDimensions) {
   EXPECT_EQ(domain.targetRank({7.999, 5.999, 3.999}), 11);
 }
 
-TEST(DomainDecompositionTest, UpdatesLocalBoxForAdaptiveDecomposition) {
-  dap::DomainDecomposition domain(1, 4, globalMin, globalMax);
+TEST(DomainDecompositionTest, DeterminesTargetRankFromAdaptiveSubdomainBoundaries) {
+  dap::DomainDecomposition domain(2, 4, globalMin, globalMax);
 
-  domain.setLocalBox({2., 1., 2.}, {5.5, 11., 12.});
+  domain.setSubdomainBoundaries({
+      std::vector<double>{0., 1.25, 4., 8.5, 10.},
+      std::vector<double>{1., 11.},
+      std::vector<double>{2., 12.},
+  });
 
-  EXPECT_EQ(domain.localMin(), (std::array<double, 3>{2., 1., 2.}));
-  EXPECT_EQ(domain.localMax(), (std::array<double, 3>{5.5, 11., 12.}));
-  EXPECT_TRUE(domain.isInsideLocalDomain({2., 5., 5.}));
-  EXPECT_TRUE(domain.isInsideLocalDomain({5.499, 5., 5.}));
-  EXPECT_FALSE(domain.isInsideLocalDomain({1.999, 5., 5.}));
-  EXPECT_FALSE(domain.isInsideLocalDomain({5.5, 5., 5.}));
+  EXPECT_EQ(domain.localMin(), (std::array<double, 3>{4., 1., 2.}));
+  EXPECT_EQ(domain.localMax(), (std::array<double, 3>{8.5, 11., 12.}));
+
+  EXPECT_EQ(domain.targetRank({0.5, 5., 5.}), 0);
+  EXPECT_EQ(domain.targetRank({1.25, 5., 5.}), 1);
+  EXPECT_EQ(domain.targetRank({3.999, 5., 5.}), 1);
+  EXPECT_EQ(domain.targetRank({4., 5., 5.}), 2);
+  EXPECT_EQ(domain.targetRank({8.5, 5., 5.}), 3);
 }
 
-TEST(DomainDecompositionTest, RejectsInvalidAdaptiveLocalBox) {
+TEST(DomainDecompositionTest, DeterminesTargetRankFromAdaptiveThreeDimensionalBoundaries) {
+  constexpr std::array<double, 3> boxMin{0., 0., 0.};
+  constexpr std::array<double, 3> boxMax{8., 6., 4.};
+  constexpr std::array<int, 3> processGrid{2, 3, 2};
+  dap::DomainDecomposition domain(0, 12, boxMin, boxMax, processGrid);
+
+  domain.setSubdomainBoundaries({
+      std::vector<double>{0., 1., 8.},
+      std::vector<double>{0., 1., 5., 6.},
+      std::vector<double>{0., 3.5, 4.},
+  });
+
+  EXPECT_EQ(domain.targetRank({0.5, 4., 3.75}), 3);
+  EXPECT_EQ(domain.targetRank({1., 5., 3.}), 10);
+}
+
+TEST(DomainDecompositionTest, RejectsInvalidSubdomainBoundaries) {
   dap::DomainDecomposition domain(1, 4, globalMin, globalMax);
 
-  EXPECT_THROW(domain.setLocalBox({-0.1, 1., 2.}, {5., 11., 12.}), std::invalid_argument);
-  EXPECT_THROW(domain.setLocalBox({2.5, 1., 2.}, {10.1, 11., 12.}), std::invalid_argument);
-  EXPECT_THROW(domain.setLocalBox({5., 1., 2.}, {5., 11., 12.}), std::invalid_argument);
+  EXPECT_THROW(domain.setSubdomainBoundaries({
+                   std::vector<double>{0., 2., 10.},
+                   std::vector<double>{1., 11.},
+                   std::vector<double>{2., 12.},
+               }),
+               std::invalid_argument);
+  EXPECT_THROW(domain.setSubdomainBoundaries({
+                   std::vector<double>{0., 2.5, 2.5, 7.5, 10.},
+                   std::vector<double>{1., 11.},
+                   std::vector<double>{2., 12.},
+               }),
+               std::invalid_argument);
+  EXPECT_THROW(domain.setSubdomainBoundaries({
+                   std::vector<double>{0.1, 2.5, 5., 7.5, 10.},
+                   std::vector<double>{1., 11.},
+                   std::vector<double>{2., 12.},
+               }),
+               std::invalid_argument);
 }
 
 TEST(DomainDecompositionTest, FindsPeriodicFaceEdgeAndCornerNeighbors) {

@@ -286,6 +286,34 @@ TEST(DistributedAutoPasTest, AppliesInvertedPressureLoadBalancingAndMigratesPart
   particles.finalize();
 }
 
+TEST(DistributedAutoPasTest, RedistributesParticlesUsingAdaptiveTargetRanks) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 2);
+
+  dap::DistributedAutoPas<Particle> particles(runtime, globalMin, globalMax, cutoff, makeConfigurator());
+
+  // Move the shared boundary from x=2.0 to x=1.5 before inserting particles.
+  const double localWork = runtime.rank() == 0 ? 3. : 1.;
+  particles.prepareInteractions(localWork);
+
+  EXPECT_DOUBLE_EQ(runtime.rank() == 0 ? particles.localBoxMax()[0] : particles.localBoxMin()[0], 1.5);
+
+  // x=1.75 belonged to rank 0 in the initial uniform grid, but belongs to rank 1
+  // after load balancing. This therefore exercises targetRank() with adaptive splits.
+  particles.addParticlesFromRoot(std::vector<Particle>{makeParticle(42, 1.75)});
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 1);
+  if (runtime.rank() == 0) {
+    EXPECT_EQ(particles.getLocalNumberOfOwnedParticles(), 0);
+  } else {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{42}));
+  }
+
+  particles.finalize();
+}
+
 TEST(DistributedAutoPasTest, AppliesRepeatedInvertedPressureLoadBalancingFromCurrentDomain) {
   int argc = 0;
   char **argv = nullptr;
@@ -331,6 +359,85 @@ TEST(DistributedAutoPasTest, AppliesRepeatedInvertedPressureLoadBalancingFromCur
     EXPECT_DOUBLE_EQ(particles.localBoxMin()[0], 1.25);
     EXPECT_DOUBLE_EQ(particles.localBoxMax()[0], 4.);
     EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{1, 2, 3, 4}));
+  }
+
+  particles.finalize();
+}
+
+TEST(DistributedAutoPasTest, BalancesMigratesAndComputesAcrossAdaptiveThreeDimensionalCorner) {
+  int argc = 0;
+  char **argv = nullptr;
+  dap::Runtime runtime(argc, argv);
+  ASSERT_EQ(runtime.size(), 8);
+
+  constexpr std::array<double, 3> boxMin{0., 0., 0.};
+  constexpr std::array<double, 3> boxMax{4., 4., 4.};
+  constexpr std::array<bool, 3> subdivideDimensions{true, true, true};
+  constexpr double threeDimensionalCutoff = 0.5;
+
+  dap::DistributedAutoPas<Particle> particles(runtime, boxMin, boxMax, threeDimensionalCutoff, subdivideDimensions,
+                                              makeConfigurator());
+
+  Particle lowerCornerParticle;
+  lowerCornerParticle.setID(8000);
+  lowerCornerParticle.setR({1.4, 1.4, 1.4});
+  lowerCornerParticle.setF({0., 0., 0.});
+
+  Particle upperCornerParticle;
+  upperCornerParticle.setID(8001);
+  upperCornerParticle.setR({1.6, 1.6, 1.6});
+  upperCornerParticle.setF({0., 0., 0.});
+
+  // Both particles initially belong to rank 0. The work distribution below gives
+  // every lower process plane three times the average work of the corresponding
+  // upper plane. In every dimension, inverted pressure therefore moves the shared
+  // boundary from 2.0 to 1.5. Particle 8001 then migrates across x, y, and z to
+  // rank 7, while particle 8000 remains on rank 0.
+  particles.addParticlesFromRoot(std::vector<Particle>{lowerCornerParticle, upperCornerParticle});
+
+  const int rank = runtime.rank();
+  const int x = rank / 4;
+  const int y = (rank % 4) / 2;
+  const int z = rank % 2;
+  const double localWork = (x == 0 ? 3. : 1.) * (y == 0 ? 3. : 1.) * (z == 0 ? 3. : 1.);
+
+  particles.prepareInteractions(localWork);
+
+  for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+    const int coordinate = dimension == 0 ? x : (dimension == 1 ? y : z);
+    EXPECT_DOUBLE_EQ(particles.localBoxMin()[dimension], coordinate == 0 ? 0. : 1.5);
+    EXPECT_DOUBLE_EQ(particles.localBoxMax()[dimension], coordinate == 0 ? 1.5 : 4.);
+  }
+
+  EXPECT_EQ(particles.getGlobalNumberOfOwnedParticles(), 2);
+  if (rank == 0) {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{8000}));
+  } else if (rank == 7) {
+    EXPECT_EQ(ownedIds(particles), (std::vector<unsigned long>{8001}));
+  } else {
+    EXPECT_EQ(particles.getLocalNumberOfOwnedParticles(), 0);
+  }
+
+  // The particles are now owned by diagonally opposite subdomains and interact
+  // across the newly shifted x/y/z corner. A correct force therefore also verifies
+  // that halo propagation uses the adaptive box geometry after load balancing.
+  dap::testing::TestForceFunctor<Particle> functor(threeDimensionalCutoff);
+  particles.computeInteractionsPrepared(&functor);
+
+  if (rank == 0) {
+    particles.forEachOwnedParticle([](const auto &particle) {
+      EXPECT_EQ(particle.getID(), 8000);
+      EXPECT_NEAR(particle.getF()[0], 0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[1], 0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[2], 0.2, 1e-12);
+    });
+  } else if (rank == 7) {
+    particles.forEachOwnedParticle([](const auto &particle) {
+      EXPECT_EQ(particle.getID(), 8001);
+      EXPECT_NEAR(particle.getF()[0], -0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[1], -0.2, 1e-12);
+      EXPECT_NEAR(particle.getF()[2], -0.2, 1e-12);
+    });
   }
 
   particles.finalize();

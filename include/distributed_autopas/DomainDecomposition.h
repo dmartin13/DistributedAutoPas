@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 
 #include "distributed_autopas/BoundaryType.h"
 
@@ -48,12 +49,13 @@ class DomainDecomposition {
   [[nodiscard]] int targetRank(const std::array<double, 3> &pos) const;
 
   /**
-   * Update the local ownership box while keeping the Cartesian process topology fixed.
+   * Replace the global split positions of the Cartesian process grid.
    *
-   * This is the geometry change required by adaptive regular-grid load balancing.
-   * Neighboring ranks are responsible for choosing matching shared boundaries.
+   * For dimension d, boundaries[d] must contain processGrid[d] + 1 strictly
+   * increasing entries spanning the complete global box. The local box is derived
+   * from the entries matching this rank's Cartesian coordinates.
    */
-  void setLocalBox(std::array<double, 3> localMin, std::array<double, 3> localMax);
+  void setSubdomainBoundaries(std::array<std::vector<double>, 3> boundaries);
 
   [[nodiscard]] std::array<int, 3> rankToCoordinates(int rank) const;
 
@@ -109,6 +111,8 @@ class DomainDecomposition {
 
   std::array<double, 3> _localMin{};
   std::array<double, 3> _localMax{};
+
+  std::array<std::vector<double>, 3> _subdomainBoundaries{};
 };
 
 }  // namespace dap

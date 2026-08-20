@@ -390,18 +390,61 @@ class DistributedAutoPas {
 
   void resizeDomainAndMigrate(std::vector<Particle> emigrants, const std::array<double, 3> &localMin,
                               const std::array<double, 3> &localMax) {
-    // Validate the new geometry without changing the active decomposition yet.
-    // This keeps the domain and AutoPas box in sync if validation fails.
+    // Synchronize the complete Cartesian split positions before changing AutoPas.
+    // targetRank() needs all process-plane boundaries once the grid is no longer uniform.
     auto resizedDomain = _domain;
-    resizedDomain.setLocalBox(localMin, localMax);
+    resizedDomain.setSubdomainBoundaries(collectSubdomainBoundaries(localMin, localMax));
 
-    auto additionalEmigrants = _autoPas.resizeBox(localMin, localMax);
+    auto additionalEmigrants = _autoPas.resizeBox(resizedDomain.localMin(), resizedDomain.localMax());
     emigrants.reserve(emigrants.size() + additionalEmigrants.size());
     emigrants.insert(emigrants.end(), std::make_move_iterator(additionalEmigrants.begin()),
                      std::make_move_iterator(additionalEmigrants.end()));
 
     _domain = std::move(resizedDomain);
     migrateAndExchangeHalos(std::move(emigrants));
+  }
+
+  [[nodiscard]] std::array<std::vector<double>, 3> collectSubdomainBoundaries(
+      const std::array<double, 3> &localMin, const std::array<double, 3> &localMax) const {
+    const std::array<double, 6> localBounds{localMin[0], localMin[1], localMin[2],
+                                            localMax[0], localMax[1], localMax[2]};
+    std::vector<double> gatheredBounds(static_cast<std::size_t>(_domain.numRanks()) * localBounds.size());
+
+    if (MPI_Allgather(localBounds.data(), static_cast<int>(localBounds.size()), MPI_DOUBLE, gatheredBounds.data(),
+                      static_cast<int>(localBounds.size()), MPI_DOUBLE, _runtime.communicator()) != MPI_SUCCESS) {
+      throw std::runtime_error("DistributedAutoPas: failed to synchronize adaptive subdomain boundaries.");
+    }
+
+    std::array<std::vector<double>, 3> boundaries;
+    std::array<std::vector<bool>, 3> initialized;
+    for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+      const auto numberOfBoundaries = static_cast<std::size_t>(_domain.processGrid()[dimension] + 1);
+      boundaries[dimension].resize(numberOfBoundaries);
+      initialized[dimension].assign(numberOfBoundaries, false);
+    }
+
+    const auto setBoundary = [&](std::size_t dimension, std::size_t boundaryIndex, double value) {
+      if (initialized[dimension][boundaryIndex] and boundaries[dimension][boundaryIndex] != value) {
+        throw std::runtime_error(
+            "DistributedAutoPas: neighboring ranks proposed inconsistent adaptive subdomain boundaries.");
+      }
+      boundaries[dimension][boundaryIndex] = value;
+      initialized[dimension][boundaryIndex] = true;
+    };
+
+    for (int rank = 0; rank < _domain.numRanks(); ++rank) {
+      const auto coordinates = _domain.rankToCoordinates(rank);
+      const auto offset = static_cast<std::size_t>(rank) * localBounds.size();
+
+      for (std::size_t dimension = 0; dimension < 3; ++dimension) {
+        const auto lowerBoundary = static_cast<std::size_t>(coordinates[dimension]);
+        const auto upperBoundary = lowerBoundary + 1;
+        setBoundary(dimension, lowerBoundary, gatheredBounds[offset + dimension]);
+        setBoundary(dimension, upperBoundary, gatheredBounds[offset + 3 + dimension]);
+      }
+    }
+
+    return boundaries;
   }
 
   void migrateAndExchangeHalos(std::vector<Particle> emigrants) {
