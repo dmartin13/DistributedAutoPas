@@ -1,0 +1,76 @@
+# Large-scale 3D spinodal-decomposition / phase-separation scenario
+# for md-flexible + DistributedAutoPas.
+#
+# Default size:
+#   192^3 = 7,077,888 particles
+#
+# This is intended as a useful distributed-memory benchmark:
+# - initially homogeneous particle distribution
+# - fully 3D periodic domain
+# - all ranks start with comparable load
+# - the system can become spatially inhomogeneous over time
+#
+# For a larger run:
+#   particles-per-dimension: [256, 256, 256]
+#   box-min: [-0.75, -0.75, -0.75]
+#   box-max: [383.25, 383.25, 383.25]
+# gives 16,777,216 particles.
+#
+# VTK output is disabled by default because it becomes very expensive at this scale.
+
+container                        : [LinkedCells]
+traversal                        : [lc_c08]
+data-layout                      : [SoA]
+newton3                          : [enabled]
+vectorization-pattern            : [1xVectorLength]
+
+verlet-rebuild-frequency         : 10
+verlet-skin-radius               : 0.5
+cell-size                        : [1]
+
+tuning-strategies                : []
+functor                          : Lennard-Jones-HWY
+
+cutoff                           : 2.5
+box-min                          : [-0.75, -0.75, -0.75]
+box-max                          : [287.25, 287.25, 287.25]
+
+deltaT                           : 0.00182367
+iterations                       : 30000
+
+boundary-type                    : [periodic, periodic, periodic]
+subdivide-dimension              : [true, true, true]
+load-balancer                    : none
+
+Sites:
+  0:
+    epsilon                      : 1.0
+    sigma                        : 1.0
+    mass                         : 1.0
+
+Objects:
+  CubeGrid:
+    0:
+      particle-type-id           : 0
+      particles-per-dimension    : [192, 192, 192]
+      particle-spacing           : 1.5
+      bottomLeftCorner           : [0.0, 0.0, 0.0]
+      velocity                   : [0.0, 0.0, 0.0]
+
+# Initialize a thermal velocity distribution and keep the system at the
+# low reduced temperature at which phase separation can develop.
+thermostat:
+  initialTemperature             : 0.7
+  targetTemperature              : 0.7
+  deltaTemperature               : 0.1
+  thermostatInterval             : 100
+  addBrownianMotion              : true
+
+no-end-config                    : true
+no-progress-bar                  : false
+log-level                        : info
+
+# Optional visualization. Enable only for selected runs.
+vtk-filename                   : dapLargeSpinodal
+vtk-write-frequency            : 1000
+vtk-output-folder              : vtkOutputFolder
